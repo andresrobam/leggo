@@ -1,4 +1,4 @@
 # leggo
 
-`go mod tidy`
+`go mod tidy` \
 `go run .`
