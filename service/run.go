@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"regexp"
 	"sync"
-	"syscall"
 
 	"github.com/andresrobam/leggo/sys"
 )
@@ -46,8 +45,8 @@ func buildCommand(commands *[]string) (outCommand string) {
 
 func (s *Service) StartService() {
 	command := buildCommand(&s.Commands)
-	s.cmd = exec.Command("cmd", "/C", command)
-	s.cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
+	s.cmd = exec.Command(sys.DefaultCommand, sys.DefaultCommandFlag, command)
+	s.cmd.SysProcAttr = sys.GetSysProcAttr()
 	var pathMessage string
 	if s.Path != "" {
 		s.cmd.Dir = s.Path
@@ -110,7 +109,7 @@ func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service
 func (s *Service) EndService() {
 	s.State = StateStopping
 	s.addSysoutLine("Closing process")
-	if err := sys.SendCtrlBreak(s.cmd.Process.Pid); err != nil {
+	if err := sys.EndProcess(s.cmd.Process); err != nil {
 		s.addSyserrLine(fmt.Sprintf("Error closing process: %s", err))
 	} else {
 		go s.Program.Send(ServiceStoppingMsg{})

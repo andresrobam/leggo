@@ -207,6 +207,7 @@ func runningServiceCount() (count int) {
 
 var contextStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
 var runningCountStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+
 // TODO: K/B/M/G/T/P/E function
 func (m model) footerView() string {
 	context := contextStyle.Render(contextName)
