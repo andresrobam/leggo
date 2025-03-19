@@ -3,18 +3,21 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/andresrobam/leggo/service"
 	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
+	"gopkg.in/yaml.v2"
 )
 
 type model struct {
 	ready    bool
 	viewport viewport.Model
-	follow   bool
 }
 
 func (m model) Init() (tea.Model, tea.Cmd) {
@@ -22,14 +25,9 @@ func (m model) Init() (tea.Model, tea.Cmd) {
 }
 
 func (m *model) setViewportContent(s *service.Service) {
-	var content string
-	s.LineMutex.RLock()
-	for _, line := range s.Lines {
-		content += line.Text + "\n"
-	}
-	s.LineMutex.RUnlock()
-	m.viewport.SetContent(content)
-	if m.follow {
+	goToBottom := m.viewport.AtBottom()
+	m.viewport.SetContent(s.Content)
+	if goToBottom {
 		m.viewport.GotoBottom()
 	}
 }
@@ -39,6 +37,8 @@ func changeActive(m *model, increment int) {
 	if len(services) < 2 {
 		return
 	}
+	services[activeIndex].YOffset = m.viewport.YOffset
+	services[activeIndex].WasAtBottom = m.viewport.AtBottom()
 	services[activeIndex].Active = false
 	activeIndex += increment
 	if activeIndex < 0 {
@@ -47,8 +47,31 @@ func changeActive(m *model, increment int) {
 		activeIndex = 0
 	}
 	services[activeIndex].Active = true
-	m.setViewportContent(&services[activeIndex])
+	m.setViewportContent(services[activeIndex])
+	if services[activeIndex].WasAtBottom {
+		m.viewport.GotoBottom()
+	} else {
+		m.viewport.YOffset = services[activeIndex].YOffset
+	}
 	activeMutex.Unlock()
+}
+
+func swap(increment int) {
+	if len(services) < 2 {
+		return
+	}
+	activeMutex.Lock()
+	defer activeMutex.Unlock()
+	newActiveIndex := activeIndex + increment
+	if newActiveIndex < 0 {
+		newActiveIndex = len(services) - 1
+	} else if newActiveIndex >= len(services) {
+		newActiveIndex = 0
+	}
+	active := services[activeIndex]
+	services[activeIndex] = services[newActiveIndex]
+	services[newActiveIndex] = active
+	activeIndex = newActiveIndex
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -61,13 +84,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		if msg.IsRepeat {
 			break
-		} else if k := msg.String(); (k == "ctrl+c" || k == "q" || k == "esc") && !quitting {
-			// TODO: send again to running/stopping services if pressed a second time
+		} else if k := msg.String(); k == "ctrl+c" || k == "q" || k == "esc" {
 			quitting = true
 			var anyRunning bool
 			for i := range services {
 				services[i].StateMutex.Lock()
-				if services[i].State == service.StateRunning {
+				if services[i].State != service.StateStopped {
 					anyRunning = true
 					services[i].EndService()
 				}
@@ -77,16 +99,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		} else if k == "w" {
-			if !m.follow {
-				m.viewport.GotoBottom()
-			}
-			m.follow = !m.follow
-		} else if k == "enter" && !quitting {
+			m.viewport.GotoBottom()
+		} else if k == "enter" {
 			activeMutex.RLock()
 			services[activeIndex].StateMutex.Lock()
 			switch services[activeIndex].State {
 			case service.StateStopped:
-				services[activeIndex].StartService()
+				if !quitting {
+					services[activeIndex].StartService()
+				}
 			case service.StateRunning:
 				services[activeIndex].EndService()
 			case service.StateStopping:
@@ -98,10 +119,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			changeActive(&m, -1)
 		} else if k == "right" || k == "l" {
 			changeActive(&m, 1)
+		} else if k == "alt+left" || k == "alt+h" {
+			swap(-1)
+		} else if k == "alt+right" || k == "alt+l" {
+			swap(1)
 		}
 
 	case service.ContentUpdateMsg:
-		m.setViewportContent(&services[activeIndex])
+		activeMutex.RLock()
+		if services[activeIndex].ContentUpdated.Swap(false) {
+			m.setViewportContent(services[activeIndex])
+		}
+		activeMutex.RUnlock()
 
 	case service.ServiceStoppedMsg:
 		if quitting {
@@ -191,7 +220,7 @@ func (m model) headerView() string {
 	return lipgloss.JoinHorizontal(lipgloss.Center, titles...)
 }
 
-const contextName = "brew"
+var contextName string
 
 func runningServiceCount() (count int) {
 	for i := range services {
@@ -207,61 +236,145 @@ func runningServiceCount() (count int) {
 
 var contextStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
 var runningCountStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+var logSizeStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+var scrollStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
 
-// TODO: K/B/M/G/T/P/E function
+const BYTE_MULTIPLIER float32 = 1024
+const UNITS string = "BKMGTPE"
+
+func formatDataSize(bytes int) string {
+	var unitIndex int
+	size := float32(bytes)
+	for {
+		new_size := size / BYTE_MULTIPLIER
+		if new_size < 1 {
+			break
+		}
+		size = new_size
+		unitIndex++
+	}
+	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.3f", size), "0"), ".") + string(UNITS[unitIndex])
+}
+
 func (m model) footerView() string {
 	context := contextStyle.Render(contextName)
 	running := runningCountStyle.Render(fmt.Sprintf("%d/%d running", runningServiceCount(), len(services)))
-	log := fmt.Sprintf("Log: %d lines / %d B", len(services[activeIndex].Lines), services[activeIndex].ContentBytes)
-	scroll := fmt.Sprintf("%3.f%%", m.viewport.ScrollPercent()*100)
+	log := logSizeStyle.Render(fmt.Sprintf("Log: %s", formatDataSize(len(services[activeIndex].Content))))
+	scroll := scrollStyle.Render(fmt.Sprintf("%3.f%%", m.viewport.ScrollPercent()*100))
 
 	components := []string{context, running, log, scroll}
 	return lipgloss.JoinHorizontal(lipgloss.Center, components...)
 }
 
-var services = make([]service.Service, 0)
+var services = make([]*service.Service, 0)
 var activeIndex = 0
 var quitting bool
 
 var activeMutex sync.RWMutex
 
+type ServiceInput struct {
+	Name     string
+	Path     string
+	Commands []string
+	Requires []string
+}
+
 func main() {
 
+	if len(os.Args) < 2 {
+		fmt.Println("No file name provided.")
+		return
+	}
+
+	servicesYaml := make(map[string]ServiceInput)
+
+	fileName := os.Args[1]
+	ymlData, err := os.ReadFile(fileName)
+	if err != nil {
+		fmt.Println("Error opening file: ", err)
+		return
+	}
+
+	err = yaml.Unmarshal([]byte(ymlData), &servicesYaml)
+	if err != nil {
+		fmt.Println("Error parsing yaml: ", err)
+		return
+	}
+
+	ymlSlice := yaml.MapSlice{}
+	yaml.Unmarshal(ymlData, &ymlSlice)
+
+	names := make([]string, len(servicesYaml))
+	for i := range ymlSlice {
+		names[i] = ymlSlice[i].Key.(string)
+	}
+
+	var hasErr bool
+	for i := range names {
+		var name string
+		s := servicesYaml[names[i]]
+		if s.Name != "" {
+			name = s.Name
+		} else {
+			name = names[i]
+		}
+		newService := service.New(name, s.Path, s.Commands)
+		services = append(services, &newService)
+	}
+
+	if hasErr {
+		return
+	}
+	services[activeIndex].Active = true
+
+	ymlRegex := regexp.MustCompile(`(.*)\.[yY][aA]?[mM][lL]`)
+	if ymlRegex.MatchString(fileName) {
+		contextName = ymlRegex.ReplaceAllString(fileName, "$1")
+	} else {
+		contextName = fileName
+	}
+
 	p := tea.NewProgram(
-		model{follow: true},
+		model{},
 		tea.WithAltScreen(),
 		tea.WithKeyboardEnhancements(tea.WithKeyReleases),
 	)
 
-	services = append(services, service.Service{Program: p, Name: "UI", Path: "C:\\Users\\Andres\\workspace\\brew\\ui", Lines: make([]service.Line, 0), Commands: []string{"bun install", "bun run dev"}})
-	services = append(services, service.Service{Program: p, Name: "docker w ansi", Path: "C:\\Users\\Andres\\workspace\\brew", Lines: make([]service.Line, 0), Commands: []string{"docker compose --ansi=auto up"}})
-	services = append(services, service.Service{Program: p, Name: "docker wo ansi", Path: "C:\\Users\\Andres\\workspace\\brew", Lines: make([]service.Line, 0), Commands: []string{"docker compose up"}})
-	services[activeIndex].Active = true
+	for i := range services {
+		services[i].Program = p
+	}
+
+	go func() {
+		ticker := time.NewTicker(6 * time.Millisecond)
+		defer ticker.Stop()
+		for range ticker.C {
+			p.Send(service.ContentUpdateMsg{})
+		}
+	}()
 
 	if _, err := p.Run(); err != nil {
-		fmt.Println("could not run program:", err)
+		fmt.Println("Error running bubbletea program: ", err)
 		os.Exit(1)
 	}
 }
 
-// TODO: when ending command and when lines has no stdout/sterr lines, send end event again in 5s
-
-// TODO: status
-// TODO: header
-// TODO: OS specific command execution
-// TODO: OS specific command stop
-// TODO: OS specific multi command support
-// TODO: per-cr follow/scroll state
+// TODO: pretty status bar
+// TODO: pretty header
+// TODO: better keyboard controls
 // TODO: possibility to add timestamps to system messages
-// TODO: possibility to add timestamps to stdout/stderr messages
-// TODO: get services from file
-// TODO: contexts
+// TODO: possibility to add timestamps to std messages
 // TODO: requirements
 // TODO: healthchecks
 // TODO: remember timestamp rules per id
+// TODO: run commands separately
+// TODO: add optional context name param
+// TODO: save custom order to ~/.config/leggo/{contextName}.yml on every order switch
+// TODO: save active service name to ~/.config/leggo/{contextName}.yml on every active tab switch
+// TODO: popup for non-service errors
+// TODO: if context specific conf exists and has custom order, apply on load (delete old services and add new ones to end)
+// TODO: if context specific conf exists and active tab, apply on load (default to 0 if missing or out of range)
 // TODO: config file
 //       command executor
-//       command splitter
-//       docker compose ansi
+//       command executor command argument name
+//       docker compose ansi flag
 //       max string length for command output
-//       allow breaking u p strings during byte thing

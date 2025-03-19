@@ -6,7 +6,7 @@ import (
 	"io"
 	"os/exec"
 	"sync"
-	"time"
+	"sync/atomic"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 )
@@ -28,28 +28,32 @@ const (
 	LineTypeSyserr
 )
 
-type Line struct {
-	Text string
-	Time time.Time
-	Type LineType
+type Service struct {
+	Name             string
+	Path             string
+	Content          string
+	Commands         []string
+	Active           bool
+	State            State
+	cmd              *exec.Cmd
+	outPipe          *io.ReadCloser
+	errPipe          *io.ReadCloser
+	Program          *tea.Program
+	StateMutex       sync.RWMutex
+	atStartOfLine    bool
+	TermAttemptCount int
+	ContentUpdated   atomic.Bool
+	YOffset          int
+	WasAtBottom      bool
 }
 
-type Service struct {
-	Name              string
-	Path              string
-	Commands          []string
-	Lines             []Line
-	ContentBytes      int
-	currentStdoutLine *Line
-	currentStderrLine *Line
-	Active            bool
-	State             State
-	cmd               *exec.Cmd
-	outPipe           *io.ReadCloser
-	errPipe           *io.ReadCloser
-	Program           *tea.Program
-	StateMutex        sync.RWMutex
-	LineMutex         sync.RWMutex
+func New(name string, path string, commands []string) Service {
+	return Service{
+		Name:          name,
+		Path:          path,
+		Commands:      commands,
+		atStartOfLine: true,
+	}
 }
 
 type ContentUpdateMsg struct{}
@@ -60,78 +64,42 @@ type ServiceStoppingMsg struct{}
 
 type ServiceStartedMsg struct{}
 
-const maxBytes int = 10*1024
-const splitLines bool = false
+const maxBytes int = 50 * 1024 * 1024
 
 func (s *Service) clearOldLines() {
-	exceededBytes := s.ContentBytes - maxBytes
-	if exceededBytes <= 0 {
-		return
+	exceededBytes := len(s.Content) - maxBytes
+	if exceededBytes > 0 {
+		s.Content = s.Content[exceededBytes:]
 	}
-	var elementsToDelete int
-	var bytesDeleted int
-	for i := range s.Lines {
-		lineBytes := len(s.Lines[i].Text)
-		if !splitLines || lineBytes <= exceededBytes {
-			elementsToDelete++
-			exceededBytes -= lineBytes
-			bytesDeleted += lineBytes
-		} else {
-			s.Lines[i].Text = s.Lines[i].Text[exceededBytes:]
-			bytesDeleted += exceededBytes
-			break
-		}
-		if exceededBytes <= 0 {
-			break
-		}
-	}
-	if elementsToDelete != 0 {
-		s.Lines = s.Lines[elementsToDelete:]
-	}
-	s.ContentBytes -= bytesDeleted
 }
 
-func (s *Service) addOutput(addition *string, endLine bool, currentLine *Line, lineType LineType) (setNewLine bool, newLine *Line) {
-	s.LineMutex.Lock()
-	defer s.LineMutex.Unlock()
-	if currentLine != nil {
-		currentLine.Text += *addition
-		if endLine {
-			setNewLine = true
-		}
+func (s *Service) addOutput(addition *string, endLine bool, lineType LineType) {
+	// if atStartOfLine maybe add timestamps and shit
+	s.Content += *addition
+	if endLine {
+		s.Content += "\n"
 	} else {
-		s.Lines = append(s.Lines, Line{Text: *addition, Time: time.Now(), Type: lineType})
-		if !endLine {
-			setNewLine = true
-			newLine = &s.Lines[len(s.Lines)-1]
-		}
+		s.atStartOfLine = false
 	}
-	s.ContentBytes += len(*addition)
+	//render based on lineType
 	s.clearOldLines()
-	if s.Active {
-		go s.Program.Send(ContentUpdateMsg{})
-	}
-	return
+	s.ContentUpdated.Store(true)
 }
 
 func (s *Service) addStdout(addition string, endLine bool) {
-	if setNewLine, newLine := s.addOutput(&addition, endLine, s.currentStdoutLine, LineTypeStdout); setNewLine {
-		s.currentStdoutLine = newLine
-	}
+	s.addOutput(&addition, endLine, LineTypeStdout)
 }
 
 func (s *Service) addSterr(addition string, endLine bool) {
-	if setNewLine, newLine := s.addOutput(&addition, endLine, s.currentStderrLine, LineTypeStderr); setNewLine {
-		s.currentStderrLine = newLine
-	}
+	s.addOutput(&addition, endLine, LineTypeStderr)
 }
 
 func (s *Service) addSyserrLine(addition string) {
-	s.addOutput(&addition, true, nil, LineTypeSyserr)
+	s.addOutput(&addition, true, LineTypeSyserr)
 }
 
 func (s *Service) addSysoutLine(addition string) {
-	s.addOutput(&addition, true, nil, LineTypeSysout)
+	s.addOutput(&addition, true, LineTypeSysout)
 }
 
 func writeFromPipe(pipe *io.ReadCloser, isErrorPipe bool, s *Service, wg *sync.WaitGroup) {

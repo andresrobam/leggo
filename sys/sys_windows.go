@@ -14,7 +14,7 @@ func GetSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{HideWindow: true, CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
 }
 
-func EndProcess(process *os.Process) error {
+func EndProcess(process *os.Process, termAttempt int) error {
 	d, err := syscall.LoadDLL("kernel32.dll")
 	if err != nil {
 		return err

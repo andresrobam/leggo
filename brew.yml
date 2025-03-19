@@ -1,0 +1,18 @@
+docker_wo_ansi:
+  path: "C:\\Users\\Andres\\workspace\\brew"
+  commands:
+    - docker compose up
+
+ui:
+  path: "C:\\Users\\Andres\\workspace\\brew\\ui"
+  commands:
+    - bun install
+    - bun run dev
+
+
+docker_w_ansi:
+  path: "C:\\Users\\Andres\\workspace\\brew"
+  commands:
+    - docker compose --ansi=auto up
+
+

@@ -101,15 +101,17 @@ func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service
 	} else {
 		s.addSyserrLine(message)
 	}
+	s.TermAttemptCount = 0
 	s.State = StateStopped
 	go s.Program.Send(ServiceStoppedMsg{})
 	s.StateMutex.Unlock()
 }
 
 func (s *Service) EndService() {
+	s.TermAttemptCount++
 	s.State = StateStopping
 	s.addSysoutLine("Closing process")
-	if err := sys.EndProcess(s.cmd.Process); err != nil {
+	if err := sys.EndProcess(s.cmd.Process, s.TermAttemptCount); err != nil {
 		s.addSyserrLine(fmt.Sprintf("Error closing process: %s", err))
 	} else {
 		go s.Program.Send(ServiceStoppingMsg{})
