@@ -119,9 +119,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			changeActive(&m, -1)
 		} else if k == "right" || k == "l" {
 			changeActive(&m, 1)
-		} else if k == "alt+left" || k == "alt+h" {
+		} else if k == "shift+left" || k == "shift+h" {
 			swap(-1)
-		} else if k == "alt+right" || k == "alt+l" {
+		} else if k == "shift+right" || k == "shift+l" {
 			swap(1)
 		}
 
@@ -238,6 +238,7 @@ var contextStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
 var runningCountStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
 var logSizeStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
 var scrollStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+var pidStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
 
 const BYTE_MULTIPLIER float32 = 1024
 const UNITS string = "BKMGTPE"
@@ -252,18 +253,26 @@ func formatDataSize(bytes int) string {
 		}
 		size = new_size
 		unitIndex++
+		if unitIndex == len(UNITS)-1 {
+			break
+		}
 	}
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.3f", size), "0"), ".") + string(UNITS[unitIndex])
 }
 
 func (m model) footerView() string {
-	context := contextStyle.Render(contextName)
-	running := runningCountStyle.Render(fmt.Sprintf("%d/%d running", runningServiceCount(), len(services)))
-	log := logSizeStyle.Render(fmt.Sprintf("Log: %s", formatDataSize(len(services[activeIndex].Content))))
-	scroll := scrollStyle.Render(fmt.Sprintf("%3.f%%", m.viewport.ScrollPercent()*100))
 
-	components := []string{context, running, log, scroll}
-	return lipgloss.JoinHorizontal(lipgloss.Center, components...)
+	var pid string
+	if services[activeIndex].Pid != 0 {
+		pid = pidStyle.Render(fmt.Sprintf("PID: %d", services[activeIndex].Pid))
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Center,
+		contextStyle.Render(contextName),
+		runningCountStyle.Render(fmt.Sprintf("%d/%d running", runningServiceCount(), len(services))),
+		pid,
+		logSizeStyle.Render(fmt.Sprintf("Log: %s", formatDataSize(len(services[activeIndex].Content)))),
+		scrollStyle.Render(fmt.Sprintf("%3.f%%", m.viewport.ScrollPercent()*100)))
 }
 
 var services = make([]*service.Service, 0)
@@ -363,15 +372,17 @@ func main() {
 // TODO: better keyboard controls
 // TODO: possibility to add timestamps to system messages
 // TODO: possibility to add timestamps to std messages
+// TODO: remember timestamp rules per id
+// TODO: style sysout messages
+// TODO: style syserr messages
 // TODO: requirements
 // TODO: healthchecks
-// TODO: remember timestamp rules per id
-// TODO: run commands separately
+// TODO: common one-time process
 // TODO: add optional context name param
-// TODO: save custom order to ~/.config/leggo/{contextName}.yml on every order switch
-// TODO: save active service name to ~/.config/leggo/{contextName}.yml on every active tab switch
+// TODO: save custom order to ~/.config/leggo.yml on every order switch
+// TODO: save active service name to ~/.config/leggo.yml on every active tab switch
 // TODO: popup for non-service errors
-// TODO: if context specific conf exists and has custom order, apply on load (delete old services and add new ones to end)
+// TODO: if context specific conf exists and has custom order, apply on load (delete old non-existing services from config and add new services to the end of the list)
 // TODO: if context specific conf exists and active tab, apply on load (default to 0 if missing or out of range)
 // TODO: config file
 //       command executor

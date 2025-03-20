@@ -29,22 +29,8 @@ func forceDockerComposeAnsi(command *string) string {
 	return *command
 }
 
-func buildCommand(commands *[]string) (outCommand string) {
-	for i, command := range *commands {
-		replaceCommand := command
-		if dockerAnsiReplacement {
-			replaceCommand = forceDockerComposeAnsi(&command)
-		}
-		outCommand += replaceCommand
-		if i != len(*commands)-1 {
-			outCommand += " & "
-		}
-	}
-	return
-}
-
 func (s *Service) StartService() {
-	command := buildCommand(&s.Commands)
+	command := forceDockerComposeAnsi(&s.Commands[s.ActiveCommandIndex])
 	s.cmd = exec.Command(sys.DefaultCommand, sys.DefaultCommandFlag, command)
 	s.cmd.SysProcAttr = sys.GetSysProcAttr()
 	var pathMessage string
@@ -71,7 +57,8 @@ func (s *Service) StartService() {
 		s.addSyserrLine(fmt.Sprintf("Error running command: %s", err))
 		return
 	}
-	s.addSysoutLine(fmt.Sprintf("Process started with PID: %d", s.cmd.Process.Pid))
+	s.Pid = s.cmd.Process.Pid
+	s.addSysoutLine(fmt.Sprintf("Process started with PID: %d", s.Pid))
 
 	wg := new(sync.WaitGroup)
 	wg.Add(2)
@@ -86,6 +73,7 @@ func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service
 
 	wg.Wait()
 	s.StateMutex.Lock()
+	wasStopping := s.State == StateStopping
 	s.State = StateStopping
 	if err := (*outPipe).Close(); err != nil && err.Error() != "close |0: file already closed" {
 		s.addSyserrLine(fmt.Sprintf("Error closing stdout pipe: %s", err))
@@ -94,16 +82,32 @@ func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service
 		s.addSyserrLine(fmt.Sprintf("Error closing stderr pipe: %s", err))
 	}
 	s.cmd.Wait()
+	s.Pid = 0
 
-	message := fmt.Sprintf("Process finished with exit code: %d", s.cmd.ProcessState.ExitCode())
-	if s.State == StateStopping {
-		s.addSysoutLine(message)
+	exitCode := s.cmd.ProcessState.ExitCode()
+	message := fmt.Sprintf("Process finished with exit code: %d", exitCode)
+	s.addSysoutLine(message)
+
+	var runNextCommand bool
+	if !wasStopping && exitCode == 0 {
+		s.ActiveCommandIndex++
+		if s.ActiveCommandIndex >= len(s.Commands) {
+			s.ActiveCommandIndex = 0
+		}
+		if s.ActiveCommandIndex != 0 {
+			runNextCommand = true
+		}
 	} else {
-		s.addSyserrLine(message)
+		s.ActiveCommandIndex = 0
 	}
+
 	s.TermAttemptCount = 0
-	s.State = StateStopped
-	go s.Program.Send(ServiceStoppedMsg{})
+	if runNextCommand {
+		go s.StartService()
+	} else {
+		s.State = StateStopped
+		go s.Program.Send(ServiceStoppedMsg{})
+	}
 	s.StateMutex.Unlock()
 }
 

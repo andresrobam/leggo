@@ -29,22 +29,24 @@ const (
 )
 
 type Service struct {
-	Name             string
-	Path             string
-	Content          string
-	Commands         []string
-	Active           bool
-	State            State
-	cmd              *exec.Cmd
-	outPipe          *io.ReadCloser
-	errPipe          *io.ReadCloser
-	Program          *tea.Program
-	StateMutex       sync.RWMutex
-	atStartOfLine    bool
-	TermAttemptCount int
-	ContentUpdated   atomic.Bool
-	YOffset          int
-	WasAtBottom      bool
+	Name               string
+	Path               string
+	Content            string
+	Commands           []string
+	Active             bool
+	State              State
+	cmd                *exec.Cmd
+	outPipe            *io.ReadCloser
+	errPipe            *io.ReadCloser
+	Program            *tea.Program
+	StateMutex         sync.RWMutex
+	atStartOfLine      bool
+	TermAttemptCount   int
+	ContentUpdated     atomic.Bool
+	YOffset            int
+	WasAtBottom        bool
+	Pid                int
+	ActiveCommandIndex int
 }
 
 func New(name string, path string, commands []string) Service {
