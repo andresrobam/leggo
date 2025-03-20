@@ -4,20 +4,21 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/andresrobam/leggo/log"
 	"github.com/andresrobam/leggo/service"
-	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"gopkg.in/yaml.v2"
 )
 
 type model struct {
-	ready    bool
-	viewport viewport.Model
+	ready bool
+	log   log.Log
 }
 
 func (m model) Init() (tea.Model, tea.Cmd) {
@@ -25,10 +26,10 @@ func (m model) Init() (tea.Model, tea.Cmd) {
 }
 
 func (m *model) setViewportContent(s *service.Service) {
-	goToBottom := m.viewport.AtBottom()
-	m.viewport.SetContent(s.Content)
+	goToBottom := m.log.AtBottom()
+	m.log.SetContent(s.Content)
 	if goToBottom {
-		m.viewport.GotoBottom()
+		m.log.GotoBottom()
 	}
 }
 
@@ -37,8 +38,8 @@ func changeActive(m *model, increment int) {
 	if len(services) < 2 {
 		return
 	}
-	services[activeIndex].YOffset = m.viewport.YOffset
-	services[activeIndex].WasAtBottom = m.viewport.AtBottom()
+	services[activeIndex].YOffset = m.log.YOffset
+	services[activeIndex].WasAtBottom = m.log.AtBottom()
 	services[activeIndex].Active = false
 	activeIndex += increment
 	if activeIndex < 0 {
@@ -49,14 +50,15 @@ func changeActive(m *model, increment int) {
 	services[activeIndex].Active = true
 	m.setViewportContent(services[activeIndex])
 	if services[activeIndex].WasAtBottom {
-		m.viewport.GotoBottom()
+		m.log.GotoBottom()
 	} else {
-		m.viewport.SetYOffset(services[activeIndex].YOffset)
+		m.log.SetYOffset(services[activeIndex].YOffset)
 	}
 	activeMutex.Unlock()
 }
 
 func swap(increment int) {
+	// TODO: don't swap if going over the bounds, push others aside instead
 	if len(services) < 2 {
 		return
 	}
@@ -99,7 +101,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 		} else if k == "w" {
-			m.viewport.GotoBottom()
+			m.log.GotoBottom()
 		} else if k == "enter" {
 			activeMutex.RLock()
 			services[activeIndex].StateMutex.Lock()
@@ -123,6 +125,54 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			swap(-1)
 		} else if k == "shift+right" || k == "shift+l" {
 			swap(1)
+		} else if k == "up" || k == "k" {
+			m.log.LineUp(1)
+		} else if k == "down" || k == "j" {
+			m.log.LineDown(1)
+		}
+		/*
+			// TODO: move to log
+			   func (m Model) updateAsModel(msg tea.Msg) Model {
+			   	if !m.initialized {
+			   		m.setInitialValues()
+			   	}
+
+			   	switch msg := msg.(type) {
+			   	case tea.KeyPressMsg:
+			   		switch {
+			   		case key.Matches(msg, m.KeyMap.PageDown):
+			   			m.ViewDown()
+
+			   		case key.Matches(msg, m.KeyMap.PageUp):
+			   			m.ViewUp()
+
+			   		case key.Matches(msg, m.KeyMap.HalfPageDown):
+			   			m.HalfViewDown()
+
+			   		case key.Matches(msg, m.KeyMap.HalfPageUp):
+			   			m.HalfViewUp()
+
+			   		case key.Matches(msg, m.KeyMap.Down):
+			   			m.LineDown(1)
+
+			   		case key.Matches(msg, m.KeyMap.Up):
+			   			m.LineUp(1)
+			   		}
+
+			   	return m
+			   }*/
+
+	case tea.MouseWheelMsg:
+		if !m.log.MouseWheelEnabled {
+			break
+		}
+
+		switch msg.Button { //nolint:exhaustive
+		case tea.MouseWheelDown:
+			m.log.LineDown(m.log.MouseWheelDelta)
+
+		case tea.MouseWheelUp:
+			m.log.LineUp(m.log.MouseWheelDelta)
 		}
 
 	case service.ContentUpdateMsg:
@@ -155,17 +205,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		verticalMarginHeight := headerHeight + footerHeight
 
 		if !m.ready {
-			m.viewport = viewport.New()
-			m.viewport.SetWidth(msg.Width)
-			m.viewport.SetHeight(msg.Height - verticalMarginHeight)
+			m.log = log.New()
+			m.log.SetWidth(msg.Width)
+			m.log.SetHeight(msg.Height - verticalMarginHeight)
 			m.ready = true
 		} else {
-			m.viewport.SetWidth(msg.Width)
-			m.viewport.SetHeight(msg.Height - verticalMarginHeight)
+			m.log.SetWidth(msg.Width)
+			m.log.SetHeight(msg.Height - verticalMarginHeight)
+			m.setViewportContent(services[activeIndex])
 		}
 	}
 
-	m.viewport, cmd = m.viewport.Update(msg)
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
@@ -175,7 +225,7 @@ func (m model) View() string {
 	if !m.ready {
 		return "Initializing..."
 	}
-	return fmt.Sprintf("%s\n%s\n%s", m.headerView(), m.viewport.View(), m.footerView())
+	return fmt.Sprintf("%s\n%s\n%s", m.headerView(), m.log.View(), m.footerView())
 }
 
 var cmdStyle = lipgloss.NewStyle().
@@ -271,7 +321,7 @@ func (m model) footerView() string {
 		runningCountStyle.Render(fmt.Sprintf("%d/%d running", runningServiceCount(), len(services))),
 		pid,
 		logSizeStyle.Render(fmt.Sprintf("Log: %s", formatDataSize(len(services[activeIndex].Content)))),
-		scrollStyle.Render(fmt.Sprintf("%3.f%%", m.viewport.ScrollPercent()*100)))
+		scrollStyle.Render(strconv.FormatInt(int64(m.log.ScrollPercent()), 10)+"%"))
 }
 
 var services = make([]*service.Service, 0)
@@ -366,6 +416,8 @@ func main() {
 	}
 }
 
+// TODO: ansi hardwrap for lines
+// TODO: separate methods for adding lines to log vs rerendring on active change/window size change
 // TODO: pretty status bar
 // TODO: pretty header
 // TODO: better keyboard controls
@@ -374,12 +426,15 @@ func main() {
 // TODO: remember timestamp rules per id
 // TODO: style sysout messages
 // TODO: style syserr messages
-// TODO: requirements
-// TODO: healthchecks
-// TODO: common one-time process
+// TODO: relative paths
+// TODO: system to make sure some services arent started in parallel
+// TODO: requirements (one service can depend on another)
+// TODO: healthchecks (that make sure requirements are complete)
+// TODO: allow overriding success codes for commands
 // TODO: add optional context name param
 // TODO: save custom order to ~/.config/leggo.yml on every order switch
 // TODO: save active service name to ~/.config/leggo.yml on every active tab switch
+// TODO: show quitting status somewhere
 // TODO: popup for non-service errors
 // TODO: if context specific conf exists and has custom order, apply on load (delete old non-existing services from config and add new services to the end of the list)
 // TODO: if context specific conf exists and active tab, apply on load (default to 0 if missing or out of range)
