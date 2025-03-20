@@ -51,7 +51,7 @@ func changeActive(m *model, increment int) {
 	if services[activeIndex].WasAtBottom {
 		m.viewport.GotoBottom()
 	} else {
-		m.viewport.YOffset = services[activeIndex].YOffset
+		m.viewport.SetYOffset(services[activeIndex].YOffset)
 	}
 	activeMutex.Unlock()
 }
@@ -158,7 +158,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport = viewport.New()
 			m.viewport.SetWidth(msg.Width)
 			m.viewport.SetHeight(msg.Height - verticalMarginHeight)
-			//m.viewport.YPosition = headerHeight
 			m.ready = true
 		} else {
 			m.viewport.SetWidth(msg.Width)
@@ -174,7 +173,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	if !m.ready {
-		return "\n  Initializing..."
+		return "Initializing..."
 	}
 	return fmt.Sprintf("%s\n%s\n%s", m.headerView(), m.viewport.View(), m.footerView())
 }
