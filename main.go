@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -11,9 +10,9 @@ import (
 
 	"github.com/andresrobam/leggo/log"
 	"github.com/andresrobam/leggo/service"
+	"github.com/andresrobam/leggo/yaml"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
-	"gopkg.in/yaml.v2"
 )
 
 type model struct {
@@ -324,72 +323,65 @@ func (m model) footerView() string {
 		scrollStyle.Render(strconv.FormatInt(int64(m.log.ScrollPercent()), 10)+"%"))
 }
 
-var services = make([]*service.Service, 0)
+var services []*service.Service
 var activeIndex = 0
 var quitting bool
 
 var activeMutex sync.RWMutex
 
-type ServiceInput struct {
+type contextDefinition struct {
 	Name     string
-	Path     string
-	Commands []string
-	Requires []string
+	Services map[string]struct {
+		Name     string
+		Path     string
+		Commands []string
+		Requires []string
+	}
 }
 
 func main() {
 
 	if len(os.Args) < 2 {
 		fmt.Println("No file name provided.")
-		return
+		os.Exit(1)
 	}
 
-	servicesYaml := make(map[string]ServiceInput)
-
 	fileName := os.Args[1]
+
 	ymlData, err := os.ReadFile(fileName)
 	if err != nil {
 		fmt.Println("Error opening file: ", err)
-		return
+		os.Exit(1)
 	}
 
-	err = yaml.Unmarshal([]byte(ymlData), &servicesYaml)
-	if err != nil {
-		fmt.Println("Error parsing yaml: ", err)
-		return
+	var context contextDefinition
+
+	if err := yaml.ImportYaml(ymlData, context); err != nil {
+		fmt.Println("Error reading yaml: ", err)
+		os.Exit(1)
 	}
+	// TODO: yaml validataion
+	servicesKeys, _ := yaml.GetKeys(ymlData, "$.services")
 
-	ymlSlice := yaml.MapSlice{}
-	yaml.Unmarshal(ymlData, &ymlSlice)
-
-	names := make([]string, len(servicesYaml))
-	for i := range ymlSlice {
-		names[i] = ymlSlice[i].Key.(string)
-	}
-
-	var hasErr bool
-	for i := range names {
+	services = make([]*service.Service, len(servicesKeys))
+	for i := range servicesKeys {
 		var name string
-		s := servicesYaml[names[i]]
+		s := context.Services[servicesKeys[i]]
 		if s.Name != "" {
 			name = s.Name
 		} else {
-			name = names[i]
+			name = servicesKeys[i]
 		}
 		newService := service.New(name, s.Path, s.Commands)
-		services = append(services, &newService)
+		services[i] = &newService
 	}
 
-	if hasErr {
-		return
-	}
 	services[activeIndex].Active = true
 
-	ymlRegex := regexp.MustCompile(`(.*)\.[yY][aA]?[mM][lL]`)
-	if ymlRegex.MatchString(fileName) {
-		contextName = ymlRegex.ReplaceAllString(fileName, "$1")
+	if context.Name == "" {
+		contextName = yaml.WithoutExtension(fileName)
 	} else {
-		contextName = fileName
+		contextName = context.Name
 	}
 
 	p := tea.NewProgram(
@@ -438,8 +430,3 @@ func main() {
 // TODO: popup for non-service errors
 // TODO: if context specific conf exists and has custom order, apply on load (delete old non-existing services from config and add new services to the end of the list)
 // TODO: if context specific conf exists and active tab, apply on load (default to 0 if missing or out of range)
-// TODO: config file
-//       command executor
-//       command executor command argument name
-//       docker compose ansi flag
-//       max string length for command output
