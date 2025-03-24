@@ -356,10 +356,14 @@ func main() {
 
 	var context contextDefinition
 
-	if err := yaml.ImportYaml(ymlData, context); err != nil {
+	if err := yaml.ImportYaml(ymlData, &context); err != nil {
 		fmt.Println("Error reading yaml: ", err)
 		os.Exit(1)
 	}
+	if len(context.Services) == 0 {
+		fmt.Println("No services defined, must define at least 1 service.")
+		os.Exit(1)
+	}		
 	// TODO: yaml validataion
 	servicesKeys, _ := yaml.GetKeys(ymlData, "$.services")
 

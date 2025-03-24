@@ -26,7 +26,7 @@ func ImportYamlFile(fileName string, target interface{}) error {
 }
 
 func ImportYaml(ymlData []byte, target interface{}) error {
-	return yaml.Unmarshal(ymlData, &target)
+	return yaml.Unmarshal(ymlData, target)
 }
 
 func GetKeys(ymlData []byte, yamlPath string) ([]string, error) {
