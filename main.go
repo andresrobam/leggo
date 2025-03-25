@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/andresrobam/leggo/config"
 	"github.com/andresrobam/leggo/log"
 	"github.com/andresrobam/leggo/service"
 	"github.com/andresrobam/leggo/yaml"
@@ -339,7 +340,17 @@ type contextDefinition struct {
 	}
 }
 
+func saveOrder() {
+}
+
 func main() {
+	jou := "tere"
+	jouerr := config.WriteContextSettings(&jou, &config.ContextSettings{ServiceOrder: []string{"tere all", "ei tea kas on on mingi salajane sõna", "uued"}})
+
+	if jouerr != nil {
+		fmt.Println(jouerr)
+		os.Exit(1)
+	}
 
 	if len(os.Args) < 2 {
 		fmt.Println("No file name provided.")
@@ -363,7 +374,7 @@ func main() {
 	if len(context.Services) == 0 {
 		fmt.Println("No services defined, must define at least 1 service.")
 		os.Exit(1)
-	}		
+	}
 	// TODO: yaml validataion
 	servicesKeys, _ := yaml.GetKeys(ymlData, "$.services")
 

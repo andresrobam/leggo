@@ -8,6 +8,7 @@ import (
 
 const configSubDirectory = "/.config/leggo"
 const configFile = "/config.yml"
+const contextSettingsFile = "/context-settings.yml"
 
 type Config struct {
 	RefreshMillis          int
@@ -15,14 +16,20 @@ type Config struct {
 	CommandArgument        string
 	ForceDockerComposeAnsi bool
 	LogBytes               int
-	ContextSettings        map[string]ContextSettings
 }
 
 type ContextSettings struct {
 	ServiceOrder []string
 }
 
-func WriteConfig(config *Config) error {
+type ContextSettingsMap map[string]ContextSettings
+
+func WriteContextSettings(contextFilePath *string, contextSettings *ContextSettings) error {
+
+	cs := ContextSettingsMap{}
+	if err := ReadContextSettings(&cs); err != nil {
+		cs = ContextSettingsMap{}
+	}
 
 	path, err := os.UserHomeDir()
 	if err != nil {
@@ -35,16 +42,31 @@ func WriteConfig(config *Config) error {
 		return err
 	}
 
-	file, err := os.Create(path + configFile)
+	path += contextSettingsFile
+
+	file, err := os.Create(path)
 	if err != nil {
 		return err
 	}
-	ymlData, err := yaml.GetBytes(*config)
+	cs[*contextFilePath] = *contextSettings
+	ymlData, err := yaml.GetBytes(&cs)
 	if err != nil {
 		return err
 	}
 	_, err = file.Write(ymlData)
 	return err
+}
+
+func ReadContextSettings(target *ContextSettingsMap) error {
+
+	path, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	if err := yaml.ImportYamlFile(path+configSubDirectory+contextSettingsFile, target); err != nil {
+		return err
+	}
+	return nil
 }
 
 func ReadConfig() (*Config, error) {
