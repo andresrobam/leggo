@@ -19,16 +19,15 @@ type Config struct {
 }
 
 type ContextSettings struct {
-	ServiceOrder []string
+	ServiceOrder  []string
+	ActiveService string
 }
-
-type ContextSettingsMap map[string]ContextSettings
 
 func WriteContextSettings(contextFilePath *string, contextSettings *ContextSettings) error {
 
-	cs := ContextSettingsMap{}
+	cs := make(map[string]ContextSettings)
 	if err := ReadContextSettings(&cs); err != nil {
-		cs = ContextSettingsMap{}
+		cs = make(map[string]ContextSettings)
 	}
 
 	path, err := os.UserHomeDir()
@@ -38,7 +37,7 @@ func WriteContextSettings(contextFilePath *string, contextSettings *ContextSetti
 
 	path += configSubDirectory
 
-	if err := os.MkdirAll(path, 0o0666); err != nil {
+	if err := os.MkdirAll(path, 0o0755); err != nil {
 		return err
 	}
 
@@ -53,11 +52,13 @@ func WriteContextSettings(contextFilePath *string, contextSettings *ContextSetti
 	if err != nil {
 		return err
 	}
-	_, err = file.Write(ymlData)
-	return err
+	if _, err := file.Write(ymlData); err != nil {
+		return err
+	}
+	return file.Close()
 }
 
-func ReadContextSettings(target *ContextSettingsMap) error {
+func ReadContextSettings(target *map[string]ContextSettings) error {
 
 	path, err := os.UserHomeDir()
 	if err != nil {

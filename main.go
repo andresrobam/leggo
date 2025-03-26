@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +35,18 @@ func (m *model) setViewportContent(s *service.Service) {
 	}
 }
 
+func saveContextSettings() {
+	serviceOrder := make([]string, len(services))
+	for i := range services {
+		serviceOrder[i] = services[i].Key
+	}
+	context.Settings.ServiceOrder = serviceOrder
+	context.Settings.ActiveService = services[activeIndex].Key
+	if err := config.WriteContextSettings(&context.FilePath, &context.Settings); err != nil {
+		// TODO: show error modal
+	}
+}
+
 func changeActive(m *model, increment int) {
 	activeMutex.Lock()
 	if len(services) < 2 {
@@ -54,26 +68,44 @@ func changeActive(m *model, increment int) {
 	} else {
 		m.log.SetYOffset(services[activeIndex].YOffset)
 	}
+
+	saveContextSettings()
 	activeMutex.Unlock()
 }
 
 func swap(increment int) {
-	// TODO: don't swap if going over the bounds, push others aside instead
 	if len(services) < 2 {
 		return
 	}
 	activeMutex.Lock()
 	defer activeMutex.Unlock()
 	newActiveIndex := activeIndex + increment
+
+	pushAllElements := 0
 	if newActiveIndex < 0 {
 		newActiveIndex = len(services) - 1
+		pushAllElements = -1
 	} else if newActiveIndex >= len(services) {
 		newActiveIndex = 0
+		pushAllElements = 1
 	}
-	active := services[activeIndex]
-	services[activeIndex] = services[newActiveIndex]
-	services[newActiveIndex] = active
+	if pushAllElements == 0 {
+		active := services[activeIndex]
+		services[activeIndex] = services[newActiveIndex]
+		services[newActiveIndex] = active
+	} else {
+		newServicesOrder := make([]*service.Service, len(services))
+		for i := range services {
+			if i == activeIndex {
+				continue
+			}
+			newServicesOrder[i+pushAllElements] = services[i]
+		}
+		newServicesOrder[newActiveIndex] = services[activeIndex]
+		services = newServicesOrder
+	}
 	activeIndex = newActiveIndex
+	saveContextSettings()
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -102,7 +134,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else if k == "w" {
 			m.log.GotoBottom()
-		} else if k == "enter" {
+		} else if k == "enter" || k == "space" {
 			activeMutex.RLock()
 			services[activeIndex].StateMutex.Lock()
 			switch services[activeIndex].State {
@@ -269,8 +301,6 @@ func (m model) headerView() string {
 	return lipgloss.JoinHorizontal(lipgloss.Center, titles...)
 }
 
-var contextName string
-
 func runningServiceCount() (count int) {
 	for i := range services {
 		switch services[i].State {
@@ -317,13 +347,14 @@ func (m model) footerView() string {
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Center,
-		contextStyle.Render(contextName),
+		contextStyle.Render(context.Name),
 		runningCountStyle.Render(fmt.Sprintf("%d/%d running", runningServiceCount(), len(services))),
 		pid,
 		logSizeStyle.Render(fmt.Sprintf("Log: %s", formatDataSize(len(services[activeIndex].Content)))),
 		scrollStyle.Render(strconv.FormatInt(int64(m.log.ScrollPercent()), 10)+"%"))
 }
 
+var context *Context
 var services []*service.Service
 var activeIndex = 0
 var quitting bool
@@ -340,17 +371,13 @@ type contextDefinition struct {
 	}
 }
 
-func saveOrder() {
+type Context struct {
+	Name     string
+	Settings config.ContextSettings
+	FilePath string
 }
 
 func main() {
-	jou := "tere"
-	jouerr := config.WriteContextSettings(&jou, &config.ContextSettings{ServiceOrder: []string{"tere all", "ei tea kas on on mingi salajane sõna", "uued"}})
-
-	if jouerr != nil {
-		fmt.Println(jouerr)
-		os.Exit(1)
-	}
 
 	if len(os.Args) < 2 {
 		fmt.Println("No file name provided.")
@@ -365,40 +392,83 @@ func main() {
 		os.Exit(1)
 	}
 
-	var context contextDefinition
+	var contextDefinition contextDefinition
 
-	if err := yaml.ImportYaml(ymlData, &context); err != nil {
+	if err := yaml.ImportYaml(ymlData, &contextDefinition); err != nil {
 		fmt.Println("Error reading yaml: ", err)
 		os.Exit(1)
 	}
-	if len(context.Services) == 0 {
+	if len(contextDefinition.Services) == 0 {
 		fmt.Println("No services defined, must define at least 1 service.")
 		os.Exit(1)
 	}
 	// TODO: yaml validataion
-	servicesKeys, _ := yaml.GetKeys(ymlData, "$.services")
 
-	services = make([]*service.Service, len(servicesKeys))
-	for i := range servicesKeys {
+	context = &Context{}
+	if contextDefinition.Name == "" {
+		context.Name = yaml.WithoutExtension(fileName)
+	} else {
+		context.Name = contextDefinition.Name
+	}
+	absoluteFilePath, err := filepath.Abs(fileName)
+	context.FilePath = absoluteFilePath
+	if err != nil {
+		fmt.Println("Error getting absolute path of file: ", err)
+		os.Exit(1)
+	}
+
+	contextSettingsMap := make(map[string]config.ContextSettings)
+	if config.ReadContextSettings(&contextSettingsMap) != nil {
+		context.Settings = config.ContextSettings{}
+	} else if contextSettings, ok := contextSettingsMap[context.FilePath]; ok {
+		context.Settings = contextSettings
+	} else {
+		context.Settings = config.ContextSettings{}
+	}
+	if context.Settings.ServiceOrder == nil {
+		context.Settings.ServiceOrder = make([]string, 0)
+	}
+
+	existingServiceKeys, _ := yaml.GetKeys(ymlData, "$.services")
+
+	serviceIndex := 0
+	finalServiceKeys := make([]string, len(existingServiceKeys))
+
+	for _, serviceKey := range context.Settings.ServiceOrder {
+		if slices.Contains(existingServiceKeys, serviceKey) {
+			finalServiceKeys[serviceIndex] = serviceKey
+			serviceIndex++
+		}
+	}
+
+	if serviceIndex != len(existingServiceKeys) {
+		for _, serviceKey := range existingServiceKeys {
+			if !slices.Contains(finalServiceKeys, serviceKey) {
+				finalServiceKeys[serviceIndex] = serviceKey
+				serviceIndex++
+			}
+		}
+	}
+
+	services = make([]*service.Service, len(finalServiceKeys))
+	for i, serviceKey := range finalServiceKeys {
 		var name string
-		s := context.Services[servicesKeys[i]]
+		s := contextDefinition.Services[serviceKey]
 		if s.Name != "" {
 			name = s.Name
 		} else {
-			name = servicesKeys[i]
+			name = serviceKey
 		}
-		newService := service.New(name, s.Path, s.Commands)
+		newService := service.New(serviceKey, name, s.Path, s.Commands)
 		services[i] = &newService
 	}
 
-	services[activeIndex].Active = true
-
-	if context.Name == "" {
-		contextName = yaml.WithoutExtension(fileName)
-	} else {
-		contextName = context.Name
+	if context.Settings.ActiveService != "" {
+		if savedActiveServiceIndex := slices.Index(finalServiceKeys, context.Settings.ActiveService); savedActiveServiceIndex != -1 {
+			activeIndex = savedActiveServiceIndex
+		}
 	}
-
+	services[activeIndex].Active = true
 	p := tea.NewProgram(
 		model{},
 		tea.WithAltScreen(),
@@ -423,25 +493,24 @@ func main() {
 	}
 }
 
+// TODO: more splitting of functions and modules and files and shit
 // TODO: ansi hardwrap for lines
-// TODO: separate methods for adding lines to log vs rerendring on active change/window size change
+// TODO: separate methods for adding lines to log vs rerendering on active change/window size change
+// TODO: ability to grep logs
 // TODO: pretty status bar
 // TODO: pretty header
+// TODO: handle too many elements on header for viewport width
+// TODO: handel too many elements on footer for viewport width
 // TODO: better keyboard controls
 // TODO: possibility to add timestamps to system messages
 // TODO: possibility to add timestamps to std messages
-// TODO: remember timestamp rules per id
+// TODO: remember timestamp rules per context service
 // TODO: style sysout messages
 // TODO: style syserr messages
-// TODO: relative paths
+// TODO: allow relative paths in context yml files
 // TODO: system to make sure some services arent started in parallel
 // TODO: requirements (one service can depend on another)
 // TODO: healthchecks (that make sure requirements are complete)
 // TODO: allow overriding success codes for commands
-// TODO: add optional context name param
-// TODO: save custom order to ~/.config/leggo.yml on every order switch
-// TODO: save active service name to ~/.config/leggo.yml on every active tab switch
+// TODO: add optional context name override param
 // TODO: show quitting status somewhere
-// TODO: popup for non-service errors
-// TODO: if context specific conf exists and has custom order, apply on load (delete old non-existing services from config and add new services to the end of the list)
-// TODO: if context specific conf exists and active tab, apply on load (default to 0 if missing or out of range)

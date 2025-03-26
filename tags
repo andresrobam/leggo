@@ -1,0 +1,8 @@
+Border	main.go	/^var contextStyle = lipgloss.NewStyle().Border(lipg/
+BorderForeground	main.go	/^	BorderForeground(lipgloss.Color("63"))$/
+Mmain.go	main.go	/^func main() {$/
+changeActive	main.go	/^func changeActive(m *model, increment int) {$/
+func	main.go	/^func (m model) Init() (tea.Model, tea.Cmd) {$/
+import	main.go	/^import ($/
+require	go.mod	/^require ($/
+swap	main.go	/^func swap(increment int) {$/

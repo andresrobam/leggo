@@ -29,6 +29,7 @@ const (
 )
 
 type Service struct {
+	Key                string
 	Name               string
 	Path               string
 	Content            string
@@ -49,8 +50,9 @@ type Service struct {
 	ActiveCommandIndex int
 }
 
-func New(name string, path string, commands []string) Service {
+func New(key string, name string, path string, commands []string) Service {
 	return Service{
+		Key:           key,
 		Name:          name,
 		Path:          path,
 		Commands:      commands,
