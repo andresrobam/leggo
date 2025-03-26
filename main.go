@@ -493,6 +493,7 @@ func main() {
 	}
 }
 
+// TODO: read config from file
 // TODO: more splitting of functions and modules and files and shit
 // TODO: ansi hardwrap for lines
 // TODO: separate methods for adding lines to log vs rerendering on active change/window size change
