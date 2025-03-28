@@ -15,7 +15,7 @@ type Config struct {
 	CommandExecutor        string
 	CommandArgument        string
 	ForceDockerComposeAnsi bool
-	LogBytes               int
+	MaxLogBytes            int
 }
 
 type ContextSettings struct {
@@ -70,17 +70,11 @@ func ReadContextSettings(target *map[string]ContextSettings) error {
 	return nil
 }
 
-func ReadConfig() (*Config, error) {
+func ReadConfig(config *Config) error {
 
 	path, err := os.UserHomeDir()
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	var config Config
-	if err := yaml.ImportYamlFile(path+configSubDirectory+configFile, config); err != nil {
-		return nil, err
-	}
-
-	return &config, nil
+	return yaml.ImportYamlFile(path+configSubDirectory+configFile, config)
 }

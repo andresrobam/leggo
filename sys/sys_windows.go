@@ -7,9 +7,6 @@ import (
 	"syscall"
 )
 
-const DefaultCommand = "cmd"
-const DefaultCommandFlag = "/C"
-
 func GetSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{HideWindow: true, CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP}
 }

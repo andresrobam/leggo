@@ -30,8 +30,13 @@ func forceDockerComposeAnsi(command *string) string {
 }
 
 func (s *Service) StartService() {
-	command := forceDockerComposeAnsi(&s.Commands[s.ActiveCommandIndex])
-	s.cmd = exec.Command(sys.DefaultCommand, sys.DefaultCommandFlag, command)
+	var command string
+	if s.Configuration.ForceDockerComposeAnsi {
+		command = forceDockerComposeAnsi(&s.Commands[s.ActiveCommandIndex])
+	} else {
+		command = s.Commands[s.ActiveCommandIndex]
+	}
+	s.cmd = exec.Command(s.Configuration.CommandExecutor, s.Configuration.CommandArgument, command)
 	s.cmd.SysProcAttr = sys.GetSysProcAttr()
 	var pathMessage string
 	if s.Path != "" {

@@ -7,9 +7,6 @@ import (
 	"syscall"
 )
 
-const DefaultCommand = "/bin/bash"
-const DefaultCommandFlag = "-c"
-
 func GetSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setpgid: true}
 }

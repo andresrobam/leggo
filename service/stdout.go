@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/andresrobam/leggo/config"
 	tea "github.com/charmbracelet/bubbletea/v2"
 )
 
@@ -48,6 +49,7 @@ type Service struct {
 	WasAtBottom        bool
 	Pid                int
 	ActiveCommandIndex int
+	Configuration      *config.Config
 }
 
 func New(key string, name string, path string, commands []string) Service {
@@ -68,10 +70,8 @@ type ServiceStoppingMsg struct{}
 
 type ServiceStartedMsg struct{}
 
-const maxBytes int = 50 * 1024 * 1024
-
 func (s *Service) clearOldLines() {
-	exceededBytes := len(s.Content) - maxBytes
+	exceededBytes := len(s.Content) - s.Configuration.MaxLogBytes
 	if exceededBytes > 0 {
 		s.Content = s.Content[exceededBytes:]
 	}

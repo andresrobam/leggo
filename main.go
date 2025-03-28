@@ -358,6 +358,7 @@ var context *Context
 var services []*service.Service
 var activeIndex = 0
 var quitting bool
+var configuration config.Config
 
 var activeMutex sync.RWMutex
 
@@ -469,6 +470,15 @@ func main() {
 		}
 	}
 	services[activeIndex].Active = true
+
+	configuration = config.Config{}
+	config.ApplyDefaults(&configuration)
+
+	if err := config.ReadConfig(&configuration); err != nil {
+		configuration = config.Config{}
+		config.ApplyDefaults(&configuration)
+	}
+
 	p := tea.NewProgram(
 		model{},
 		tea.WithAltScreen(),
@@ -477,10 +487,11 @@ func main() {
 
 	for i := range services {
 		services[i].Program = p
+		services[i].Configuration = &configuration
 	}
 
 	go func() {
-		ticker := time.NewTicker(6 * time.Millisecond)
+		ticker := time.NewTicker(time.Duration(configuration.RefreshMillis) * time.Millisecond)
 		defer ticker.Stop()
 		for range ticker.C {
 			p.Send(service.ContentUpdateMsg{})
@@ -493,7 +504,6 @@ func main() {
 	}
 }
 
-// TODO: read config from file
 // TODO: more splitting of functions and modules and files and shit
 // TODO: ansi hardwrap for lines
 // TODO: separate methods for adding lines to log vs rerendering on active change/window size change
