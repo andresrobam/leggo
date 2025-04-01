@@ -157,54 +157,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			swap(-1)
 		} else if k == "shift+right" || k == "shift+l" {
 			swap(1)
-		} else if k == "up" || k == "k" {
-			m.log.LineUp(1)
-		} else if k == "down" || k == "j" {
-			m.log.LineDown(1)
-		}
-		/*
-			// TODO: move to log
-			   func (m Model) updateAsModel(msg tea.Msg) Model {
-			   	if !m.initialized {
-			   		m.setInitialValues()
-			   	}
-
-			   	switch msg := msg.(type) {
-			   	case tea.KeyPressMsg:
-			   		switch {
-			   		case key.Matches(msg, m.KeyMap.PageDown):
-			   			m.ViewDown()
-
-			   		case key.Matches(msg, m.KeyMap.PageUp):
-			   			m.ViewUp()
-
-			   		case key.Matches(msg, m.KeyMap.HalfPageDown):
-			   			m.HalfViewDown()
-
-			   		case key.Matches(msg, m.KeyMap.HalfPageUp):
-			   			m.HalfViewUp()
-
-			   		case key.Matches(msg, m.KeyMap.Down):
-			   			m.LineDown(1)
-
-			   		case key.Matches(msg, m.KeyMap.Up):
-			   			m.LineUp(1)
-			   		}
-
-			   	return m
-			   }*/
-
-	case tea.MouseWheelMsg:
-		if !m.log.MouseWheelEnabled {
-			break
-		}
-
-		switch msg.Button { //nolint:exhaustive
-		case tea.MouseWheelDown:
-			m.log.LineDown(m.log.MouseWheelDelta)
-
-		case tea.MouseWheelUp:
-			m.log.LineUp(m.log.MouseWheelDelta)
 		}
 
 	case service.ContentUpdateMsg:
@@ -237,7 +189,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		verticalMarginHeight := headerHeight + footerHeight
 
 		if !m.ready {
-			m.log = log.New()
+			m.log = viewport.New()
+			m.log.SoftWrap = true
 			m.log.SetWidth(msg.Width)
 			m.log.SetHeight(msg.Height - verticalMarginHeight)
 			m.ready = true
@@ -247,6 +200,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setViewportContent(services[activeIndex])
 		}
 	}
+
+	m.log, cmd = m.log.Update(msg)
 
 	cmds = append(cmds, cmd)
 
