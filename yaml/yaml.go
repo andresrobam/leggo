@@ -22,7 +22,8 @@ func ImportYamlFile(fileName string, target interface{}) error {
 	if err != nil {
 		return err
 	}
-	return ImportYaml(ymlData, target)
+	err = ImportYaml(ymlData, target)
+	return err
 }
 
 func ImportYaml(ymlData []byte, target interface{}) error {

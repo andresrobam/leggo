@@ -11,20 +11,20 @@ import (
 	"time"
 
 	"github.com/andresrobam/leggo/config"
-	"github.com/andresrobam/leggo/log"
 	"github.com/andresrobam/leggo/service"
 	"github.com/andresrobam/leggo/yaml"
+	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
 type model struct {
 	ready bool
-	log   log.Log
+	log   viewport.Model
 }
 
-func (m model) Init() (tea.Model, tea.Cmd) {
-	return m, nil
+func (m model) Init() tea.Cmd {
+	return nil
 }
 
 func (m *model) setViewportContent(s *service.Service) {
@@ -269,11 +269,11 @@ var activeCmdStyle = lipgloss.NewStyle().
 	BorderForeground(lipgloss.Color("9"))
 
 var stoppedStyle = lipgloss.NewStyle().
-	Foreground(lipgloss.Color(9))
+	Foreground(lipgloss.Color("#ff0000"))
 var runningStyle = lipgloss.NewStyle().
-	Foreground(lipgloss.Color(10))
+	Foreground(lipgloss.Color("#00ff00"))
 var stoppingStyle = lipgloss.NewStyle().
-	Foreground(lipgloss.Color(11))
+	Foreground(lipgloss.Color("#ffff00"))
 
 func (m model) headerView() string {
 
@@ -363,13 +363,13 @@ var configuration config.Config
 var activeMutex sync.RWMutex
 
 type contextDefinition struct {
-	Name     string
+	Name     string `yaml:"name"`
 	Services map[string]struct {
 		Name     string
 		Path     string
 		Commands []string
 		Requires []string
-	}
+	} `yaml:"services"`
 }
 
 type Context struct {
@@ -471,25 +471,24 @@ func main() {
 	}
 	services[activeIndex].Active = true
 
-	configuration = config.Config{}
+	var configuration config.Config
 	config.ApplyDefaults(&configuration)
 
 	if err := config.ReadConfig(&configuration); err != nil {
+		fmt.Println("error reading config", err)
 		configuration = config.Config{}
 		config.ApplyDefaults(&configuration)
 	}
-
+	fmt.Printf("%+v", configuration)
 	p := tea.NewProgram(
 		model{},
 		tea.WithAltScreen(),
 		tea.WithKeyboardEnhancements(tea.WithKeyReleases),
 	)
-
 	for i := range services {
 		services[i].Program = p
 		services[i].Configuration = &configuration
 	}
-
 	go func() {
 		ticker := time.NewTicker(time.Duration(configuration.RefreshMillis) * time.Millisecond)
 		defer ticker.Stop()

@@ -11,16 +11,16 @@ const configFile = "/config.yml"
 const contextSettingsFile = "/context-settings.yml"
 
 type Config struct {
-	RefreshMillis          int
-	CommandExecutor        string
-	CommandArgument        string
-	ForceDockerComposeAnsi bool
-	MaxLogBytes            int
+	RefreshMillis          int    `yaml:"refreshMillis"`
+	CommandExecutor        string `yaml:"commandExecutor"`
+	CommandArgument        string `yaml:"commandArgument"`
+	ForceDockerComposeAnsi bool   `yaml:"forceDockerComposeAnsi"`
+	MaxLogBytes            int    `yaml:"maxLogBytes"`
 }
 
 type ContextSettings struct {
-	ServiceOrder  []string
-	ActiveService string
+	ServiceOrder  []string `yaml:"serviceOrder"`
+	ActiveService string   `yaml:"activeService"`
 }
 
 func WriteContextSettings(contextFilePath *string, contextSettings *ContextSettings) error {
@@ -64,10 +64,7 @@ func ReadContextSettings(target *map[string]ContextSettings) error {
 	if err != nil {
 		return err
 	}
-	if err := yaml.ImportYamlFile(path+configSubDirectory+contextSettingsFile, target); err != nil {
-		return err
-	}
-	return nil
+	return yaml.ImportYamlFile(path+configSubDirectory+contextSettingsFile, target)
 }
 
 func ReadConfig(config *Config) error {
