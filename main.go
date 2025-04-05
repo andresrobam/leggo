@@ -20,19 +20,10 @@ import (
 
 type model struct {
 	ready bool
-	log   viewport.Model
 }
 
 func (m model) Init() tea.Cmd {
 	return nil
-}
-
-func (m *model) setViewportContent(s *service.Service) {
-	goToBottom := m.log.AtBottom()
-	m.log.SetContent(s.Content)
-	if goToBottom {
-		m.log.GotoBottom()
-	}
 }
 
 func saveContextSettings() {
@@ -52,8 +43,6 @@ func changeActive(m *model, increment int) {
 	if len(services) < 2 {
 		return
 	}
-	services[activeIndex].YOffset = m.log.YOffset
-	services[activeIndex].WasAtBottom = m.log.AtBottom()
 	services[activeIndex].Active = false
 	activeIndex += increment
 	if activeIndex < 0 {
@@ -62,12 +51,6 @@ func changeActive(m *model, increment int) {
 		activeIndex = 0
 	}
 	services[activeIndex].Active = true
-	m.setViewportContent(services[activeIndex])
-	if services[activeIndex].WasAtBottom {
-		m.log.GotoBottom()
-	} else {
-		m.log.SetYOffset(services[activeIndex].YOffset)
-	}
 
 	saveContextSettings()
 	activeMutex.Unlock()
@@ -132,8 +115,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !anyRunning {
 				return m, tea.Quit
 			}
-		} else if k == "w" {
-			m.log.GotoBottom()
 		} else if k == "enter" || k == "space" {
 			activeMutex.RLock()
 			services[activeIndex].StateMutex.Lock()
@@ -159,11 +140,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			swap(1)
 		}
 
-	case service.ContentUpdateMsg:
-		activeMutex.RLock()
-		if services[activeIndex].ContentUpdated.Swap(false) {
-			m.setViewportContent(services[activeIndex])
-		}
 		activeMutex.RUnlock()
 
 	case service.ServiceStoppedMsg:
@@ -305,8 +281,8 @@ func (m model) footerView() string {
 		contextStyle.Render(context.Name),
 		runningCountStyle.Render(fmt.Sprintf("%d/%d running", runningServiceCount(), len(services))),
 		pid,
-		logSizeStyle.Render(fmt.Sprintf("Log: %s", formatDataSize(len(services[activeIndex].Content)))),
-		scrollStyle.Render(strconv.FormatInt(int64(m.log.ScrollPercent()), 10)+"%"))
+		//		logSizeStyle.Render(fmt.Sprintf("Log: %s", formatDataSize(len(services[activeIndex].Content)))),
+		scrollStyle.Render(strconv.FormatInt(int64(m.log.ScrollPercent()), 10)+"%")) // TODO: parse float scorll percentage
 }
 
 var context *Context
@@ -465,7 +441,7 @@ func main() {
 // TODO: pretty status bar
 // TODO: pretty header
 // TODO: handle too many elements on header for viewport width
-// TODO: handel too many elements on footer for viewport width
+// TODO: handle too many elements on footer for viewport width
 // TODO: better keyboard controls
 // TODO: possibility to add timestamps to system messages
 // TODO: possibility to add timestamps to std messages

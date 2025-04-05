@@ -11,11 +11,13 @@ const configFile = "/config.yml"
 const contextSettingsFile = "/context-settings.yml"
 
 type Config struct {
-	RefreshMillis          int    `yaml:"refreshMillis"`
-	CommandExecutor        string `yaml:"commandExecutor"`
-	CommandArgument        string `yaml:"commandArgument"`
-	ForceDockerComposeAnsi bool   `yaml:"forceDockerComposeAnsi"`
-	MaxLogBytes            int    `yaml:"maxLogBytes"`
+	RefreshMillis          int     `yaml:"refreshMillis"`
+	CommandExecutor        string  `yaml:"commandExecutor"`
+	CommandArgument        string  `yaml:"commandArgument"`
+	ForceDockerComposeAnsi bool    `yaml:"forceDockerComposeAnsi"`
+	MaxLogBytes            int     `yaml:"maxLogBytes"`
+	InitialLineCapacity    int     `yaml:"InitialLineCapacity"`
+	LineCapacityMultiplier float32 `yaml:"lineCapacityMultiplier"`
 }
 
 type ContextSettings struct {

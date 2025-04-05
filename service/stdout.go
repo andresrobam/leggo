@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/andresrobam/leggo/config"
+	"github.com/andresrobam/leggo/log"
 	tea "github.com/charmbracelet/bubbletea/v2"
 )
 
@@ -33,7 +34,6 @@ type Service struct {
 	Key                string
 	Name               string
 	Path               string
-	Content            string
 	Commands           []string
 	Active             bool
 	State              State
@@ -42,23 +42,20 @@ type Service struct {
 	errPipe            *io.ReadCloser
 	Program            *tea.Program
 	StateMutex         sync.RWMutex
-	atStartOfLine      bool
 	TermAttemptCount   int
 	ContentUpdated     atomic.Bool
-	YOffset            int
-	WasAtBottom        bool
 	Pid                int
 	ActiveCommandIndex int
 	Configuration      *config.Config
+	Log                *log.Log
 }
 
 func New(key string, name string, path string, commands []string) Service {
 	return Service{
-		Key:           key,
-		Name:          name,
-		Path:          path,
-		Commands:      commands,
-		atStartOfLine: true,
+		Key:      key,
+		Name:     name,
+		Path:     path,
+		Commands: commands,
 	}
 }
 
@@ -71,20 +68,15 @@ type ServiceStoppingMsg struct{}
 type ServiceStartedMsg struct{}
 
 func (s *Service) clearOldLines() {
-	exceededBytes := len(s.Content) - s.Configuration.MaxLogBytes
-	if exceededBytes > 0 {
-		s.Content = s.Content[exceededBytes:]
-	}
+	// TODO: move to log
+	// exceededBytes := len(s.Content) - s.Configuration.MaxLogBytes
+	// if exceededBytes > 0 {
+	// 	s.Content = s.Content[exceededBytes:]
+	// }
 }
 
 func (s *Service) addOutput(addition *string, endLine bool, lineType LineType) {
-	// if atStartOfLine maybe add timestamps and shit
-	s.Content += *addition
-	if endLine {
-		s.Content += "\n"
-	} else {
-		s.atStartOfLine = false
-	}
+	s.Log.AddContent(addition, endLine)
 	//render based on lineType
 	s.clearOldLines()
 	s.ContentUpdated.Store(true)
