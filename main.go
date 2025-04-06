@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"github.com/andresrobam/leggo/config"
 	"github.com/andresrobam/leggo/service"
 	"github.com/andresrobam/leggo/yaml"
-	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 )
@@ -32,26 +30,28 @@ func saveContextSettings() {
 		serviceOrder[i] = services[i].Key
 	}
 	context.Settings.ServiceOrder = serviceOrder
-	context.Settings.ActiveService = services[activeIndex].Key
+	context.Settings.ActiveService = activeService.Key
+
+	if context.Settings.ActiveService != "" && context.Settings.ActiveService != activeService.Key {
+
+	}
 	if err := config.WriteContextSettings(&context.FilePath, &context.Settings); err != nil {
 		// TODO: show error modal
 	}
 }
 
-func changeActive(m *model, increment int) {
-	activeMutex.Lock()
+func changeActive(increment int) {
 	if len(services) < 2 {
 		return
 	}
-	services[activeIndex].Active = false
+	activeMutex.Lock()
 	activeIndex += increment
 	if activeIndex < 0 {
 		activeIndex = len(services) - 1
 	} else if activeIndex >= len(services) {
 		activeIndex = 0
 	}
-	services[activeIndex].Active = true
-
+	activeService = services[activeIndex]
 	saveContextSettings()
 	activeMutex.Unlock()
 }
@@ -117,30 +117,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else if k == "enter" || k == "space" {
 			activeMutex.RLock()
-			services[activeIndex].StateMutex.Lock()
-			switch services[activeIndex].State {
+			activeService.StateMutex.Lock()
+			switch activeService.State {
 			case service.StateStopped:
 				if !quitting {
-					services[activeIndex].StartService()
+					activeService.StartService()
 				}
 			case service.StateRunning:
-				services[activeIndex].EndService()
+				activeService.EndService()
 			case service.StateStopping:
-				services[activeIndex].EndService()
+				activeService.EndService()
 			}
-			services[activeIndex].StateMutex.Unlock()
+			activeService.StateMutex.Unlock()
 			activeMutex.RUnlock()
 		} else if k == "left" || k == "h" {
-			changeActive(&m, -1)
+			changeActive(-1)
 		} else if k == "right" || k == "l" {
-			changeActive(&m, 1)
+			changeActive(1)
 		} else if k == "shift+left" || k == "shift+h" {
 			swap(-1)
 		} else if k == "shift+right" || k == "shift+l" {
 			swap(1)
+		} else if k == "up" || k == "k" {
+			activeMutex.RLock()
+			activeService.Log.Scroll(-1)
+			activeMutex.RUnlock()
+		} else if k == "down" || k == "j" {
+			activeMutex.RLock()
+			activeService.Log.Scroll(1)
+			activeMutex.RUnlock()
 		}
-
-		activeMutex.RUnlock()
 
 	case service.ServiceStoppedMsg:
 		if quitting {
@@ -162,22 +168,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		headerHeight := lipgloss.Height(m.headerView())
 		footerHeight := lipgloss.Height(m.footerView())
-		verticalMarginHeight := headerHeight + footerHeight
+
+		activeMutex.RLock()
+
+		for i := range services {
+			services[i].Log.SetSize(msg.Width, msg.Height-headerHeight-footerHeight)
+		}
 
 		if !m.ready {
-			m.log = viewport.New()
-			m.log.SoftWrap = true
-			m.log.SetWidth(msg.Width)
-			m.log.SetHeight(msg.Height - verticalMarginHeight)
 			m.ready = true
-		} else {
-			m.log.SetWidth(msg.Width)
-			m.log.SetHeight(msg.Height - verticalMarginHeight)
-			m.setViewportContent(services[activeIndex])
 		}
-	}
 
-	m.log, cmd = m.log.Update(msg)
+		activeMutex.RUnlock()
+	}
 
 	cmds = append(cmds, cmd)
 
@@ -188,7 +191,13 @@ func (m model) View() string {
 	if !m.ready {
 		return "Initializing..."
 	}
-	return fmt.Sprintf("%s\n%s\n%s", m.headerView(), m.log.View(), m.footerView())
+	activeMutex.RLock()
+	defer activeMutex.RUnlock()
+	logView, clearScreen := activeService.Log.View()
+	if clearScreen {
+		go p.Send(tea.ClearScreen())
+	}
+	return fmt.Sprintf("%s\n%s\n%s", m.headerView(), logView, m.footerView())
 }
 
 var cmdStyle = lipgloss.NewStyle().
@@ -222,7 +231,7 @@ func (m model) headerView() string {
 			stateStyle = &stoppedStyle
 		}
 		services[i].StateMutex.RUnlock()
-		if services[i].Active {
+		if i == activeIndex {
 			tabStyle = &activeCmdStyle
 		} else {
 			tabStyle = &cmdStyle
@@ -273,20 +282,22 @@ func formatDataSize(bytes int) string {
 func (m model) footerView() string {
 
 	var pid string
-	if services[activeIndex].Pid != 0 {
-		pid = pidStyle.Render(fmt.Sprintf("PID: %d", services[activeIndex].Pid))
+	if activeService.Pid != 0 {
+		pid = pidStyle.Render(fmt.Sprintf("PID: %d", activeService.Pid))
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Center,
 		contextStyle.Render(context.Name),
 		runningCountStyle.Render(fmt.Sprintf("%d/%d running", runningServiceCount(), len(services))),
 		pid,
-		//		logSizeStyle.Render(fmt.Sprintf("Log: %s", formatDataSize(len(services[activeIndex].Content)))),
-		scrollStyle.Render(strconv.FormatInt(int64(m.log.ScrollPercent()), 10)+"%")) // TODO: parse float scorll percentage
+		logSizeStyle.Render(fmt.Sprintf("Log: %s", formatDataSize(activeService.Log.GetContentSize()))),
+	)
+	// scrollStyle.Render(strconv.FormatInt(int64(activeService.Log.ScrollPercent()), 10)+"%")) // TODO: uncomment and fix
 }
 
 var context *Context
 var services []*service.Service
+var activeService *service.Service
 var activeIndex = 0
 var quitting bool
 var configuration config.Config
@@ -308,6 +319,8 @@ type Context struct {
 	Settings config.ContextSettings
 	FilePath string
 }
+
+var p *tea.Program
 
 func main() {
 
@@ -347,6 +360,14 @@ func main() {
 	if err != nil {
 		fmt.Println("Error getting absolute path of file: ", err)
 		os.Exit(1)
+	}
+
+	var configuration config.Config
+	config.ApplyDefaults(&configuration)
+
+	if err := config.ReadConfig(&configuration); err != nil {
+		configuration = config.Config{}
+		config.ApplyDefaults(&configuration)
 	}
 
 	contextSettingsMap := make(map[string]config.ContextSettings)
@@ -391,7 +412,7 @@ func main() {
 		} else {
 			name = serviceKey
 		}
-		newService := service.New(serviceKey, name, s.Path, s.Commands)
+		newService := service.New(serviceKey, name, s.Path, s.Commands, &configuration)
 		services[i] = &newService
 	}
 
@@ -400,25 +421,15 @@ func main() {
 			activeIndex = savedActiveServiceIndex
 		}
 	}
-	services[activeIndex].Active = true
+	activeService = services[activeIndex]
 
-	var configuration config.Config
-	config.ApplyDefaults(&configuration)
-
-	if err := config.ReadConfig(&configuration); err != nil {
-		fmt.Println("error reading config", err)
-		configuration = config.Config{}
-		config.ApplyDefaults(&configuration)
-	}
-	fmt.Printf("%+v", configuration)
-	p := tea.NewProgram(
+	p = tea.NewProgram(
 		model{},
 		tea.WithAltScreen(),
 		tea.WithKeyboardEnhancements(tea.WithKeyReleases),
 	)
 	for i := range services {
 		services[i].Program = p
-		services[i].Configuration = &configuration
 	}
 	go func() {
 		ticker := time.NewTicker(time.Duration(configuration.RefreshMillis) * time.Millisecond)
@@ -435,8 +446,6 @@ func main() {
 }
 
 // TODO: more splitting of functions and modules and files and shit
-// TODO: ansi hardwrap for lines
-// TODO: separate methods for adding lines to log vs rerendering on active change/window size change
 // TODO: ability to grep logs
 // TODO: pretty status bar
 // TODO: pretty header

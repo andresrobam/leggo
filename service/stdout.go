@@ -6,7 +6,6 @@ import (
 	"io"
 	"os/exec"
 	"sync"
-	"sync/atomic"
 
 	"github.com/andresrobam/leggo/config"
 	"github.com/andresrobam/leggo/log"
@@ -35,7 +34,6 @@ type Service struct {
 	Name               string
 	Path               string
 	Commands           []string
-	Active             bool
 	State              State
 	cmd                *exec.Cmd
 	outPipe            *io.ReadCloser
@@ -43,19 +41,20 @@ type Service struct {
 	Program            *tea.Program
 	StateMutex         sync.RWMutex
 	TermAttemptCount   int
-	ContentUpdated     atomic.Bool
 	Pid                int
 	ActiveCommandIndex int
 	Configuration      *config.Config
 	Log                *log.Log
 }
 
-func New(key string, name string, path string, commands []string) Service {
+func New(key string, name string, path string, commands []string, configuration *config.Config) Service {
 	return Service{
-		Key:      key,
-		Name:     name,
-		Path:     path,
-		Commands: commands,
+		Key:           key,
+		Name:          name,
+		Path:          path,
+		Commands:      commands,
+		Configuration: configuration,
+		Log:           log.New(configuration),
 	}
 }
 
@@ -67,19 +66,8 @@ type ServiceStoppingMsg struct{}
 
 type ServiceStartedMsg struct{}
 
-func (s *Service) clearOldLines() {
-	// TODO: move to log
-	// exceededBytes := len(s.Content) - s.Configuration.MaxLogBytes
-	// if exceededBytes > 0 {
-	// 	s.Content = s.Content[exceededBytes:]
-	// }
-}
-
 func (s *Service) addOutput(addition *string, endLine bool, lineType LineType) {
 	s.Log.AddContent(addition, endLine)
-	//render based on lineType
-	s.clearOldLines()
-	s.ContentUpdated.Store(true)
 }
 
 func (s *Service) addStdout(addition string, endLine bool) {
