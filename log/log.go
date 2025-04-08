@@ -70,6 +70,14 @@ func (l *Log) Scroll(amount int) {
 	l.contentUpdated.Store(true)
 }
 
+func (l *Log) GotoBottom() {
+	if len(l.lines) == 0 {
+		return
+	}
+	l.currentLine = len(l.lines) - 1
+	l.contentUpdated.Store(true)
+}
+
 func (l *Log) recalculateCurrentLineOffset() {
 	if l.currentLineOffset == 0 {
 		return

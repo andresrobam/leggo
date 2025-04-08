@@ -146,6 +146,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			activeMutex.RLock()
 			activeService.Log.Scroll(1)
 			activeMutex.RUnlock()
+		} else if k == "b" || k == "f" {
+			activeService.Log.GotoBottom()
 		}
 
 	case service.ServiceStoppedMsg:
@@ -195,7 +197,7 @@ func (m model) View() string {
 	defer activeMutex.RUnlock()
 	logView, clearScreen := activeService.Log.View()
 	if clearScreen {
-		go p.Send(tea.ClearScreen())
+		//go p.Send(tea.ClearScreen())
 	}
 	return fmt.Sprintf("%s\n%s\n%s", m.headerView(), logView, m.footerView())
 }
@@ -253,12 +255,6 @@ func runningServiceCount() (count int) {
 	return
 }
 
-var contextStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
-var runningCountStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
-var logSizeStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
-var scrollStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
-var pidStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
-
 const BYTE_MULTIPLIER float32 = 1024
 const UNITS string = "BKMGTPE"
 
@@ -279,21 +275,47 @@ func formatDataSize(bytes int) string {
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.3f", size), "0"), ".") + string(UNITS[unitIndex])
 }
 
+const statusBarTextColor = "#dddddd"
+
+const statusBarColor0 = "#12afe3"
+const statusBarColor1 = "#128ce3"
+const statusBarColor2 = "#1262e3"
+const statusBarColor3 = "#123ce3"
+
+var contextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarTextColor)).Background(lipgloss.Color(statusBarColor0))
+var contextTransitionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarColor0)).Background(lipgloss.Color(statusBarColor1))
+
+var runningCountStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarTextColor)).Background(lipgloss.Color(statusBarColor1))
+var runningCountTransitionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarColor1)).Background(lipgloss.Color(statusBarColor2))
+
+var logSizeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarTextColor)).Background(lipgloss.Color(statusBarColor2))
+var logSizeTransitionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarColor2)).Background(lipgloss.Color(statusBarColor3))
+
+var pidStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarTextColor)).Background(lipgloss.Color(statusBarColor3))
+var pidTransitionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarColor3))
+
 func (m model) footerView() string {
 
 	var pid string
 	if activeService.Pid != 0 {
-		pid = pidStyle.Render(fmt.Sprintf("PID: %d", activeService.Pid))
+		pid = pidStyle.Render(fmt.Sprintf(" PID %d ", activeService.Pid))
+	} else {
+		pid = pidStyle.Render(" PID - ")
 	}
 
 	return lipgloss.JoinHorizontal(lipgloss.Center,
-		contextStyle.Render(context.Name),
-		runningCountStyle.Render(fmt.Sprintf("%d/%d running", runningServiceCount(), len(services))),
+		contextStyle.Render(" "+context.Name+" "),
+		contextTransitionStyle.Render("\uE0B0"),
+		runningCountStyle.Render(fmt.Sprintf(" %d/%d running ", runningServiceCount(), len(services))),
+		runningCountTransitionStyle.Render("\uE0B0"),
+		logSizeStyle.Render(fmt.Sprintf(" Log: %s ", formatDataSize(activeService.Log.GetContentSize()))),
+		logSizeTransitionStyle.Render("\uE0B0"),
 		pid,
-		logSizeStyle.Render(fmt.Sprintf("Log: %s", formatDataSize(activeService.Log.GetContentSize()))),
+		pidTransitionStyle.Render("\uE0B0"),
 	)
-	// scrollStyle.Render(strconv.FormatInt(int64(activeService.Log.ScrollPercent()), 10)+"%")) // TODO: uncomment and fix
 }
+
+// TODO: all of the status bar style stuff could be a for loop
 
 var context *Context
 var services []*service.Service
@@ -403,6 +425,7 @@ func main() {
 		}
 	}
 
+	contextDir := filepath.Dir(absoluteFilePath)
 	services = make([]*service.Service, len(finalServiceKeys))
 	for i, serviceKey := range finalServiceKeys {
 		var name string
@@ -412,7 +435,15 @@ func main() {
 		} else {
 			name = serviceKey
 		}
-		newService := service.New(serviceKey, name, s.Path, s.Commands, &configuration)
+
+		servicePath := s.Path
+		if servicePath == "" {
+			servicePath = contextDir
+		} else if !filepath.IsAbs(servicePath) {
+			servicePath, _ = filepath.Abs(filepath.Join(contextDir, servicePath))
+		}
+
+		newService := service.New(serviceKey, name, servicePath, s.Commands, &configuration)
 		services[i] = &newService
 	}
 
@@ -447,7 +478,6 @@ func main() {
 
 // TODO: more splitting of functions and modules and files and shit
 // TODO: ability to grep logs
-// TODO: pretty status bar
 // TODO: pretty header
 // TODO: handle too many elements on header for viewport width
 // TODO: handle too many elements on footer for viewport width
@@ -457,7 +487,6 @@ func main() {
 // TODO: remember timestamp rules per context service
 // TODO: style sysout messages
 // TODO: style syserr messages
-// TODO: allow relative paths in context yml files
 // TODO: system to make sure some services arent started in parallel
 // TODO: requirements (one service can depend on another)
 // TODO: healthchecks (that make sure requirements are complete)
