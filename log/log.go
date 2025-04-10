@@ -1,7 +1,6 @@
 package log
 
 import (
-	"math"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -12,18 +11,16 @@ import (
 )
 
 type Log struct {
-	width                       int
-	height                      int
-	lines                       []string
-	lastLineOpen                bool
-	currentLine                 int
-	currentLineOffset           int
-	currentLineOffsetPercentage float64
-	configuration               *config.Config
-	contentMutex                sync.RWMutex
-	contentUpdated              atomic.Bool
-	view                        *string
-	size                        int
+	width          int
+	height         int
+	lines          []string
+	lastLineOpen   bool
+	currentLine    int
+	configuration  *config.Config
+	contentMutex   sync.RWMutex
+	contentUpdated atomic.Bool
+	view           *string
+	size           int
 }
 
 func New(configuration *config.Config) *Log {
@@ -62,11 +59,14 @@ func (l *Log) View() (string, bool) {
 func (l *Log) Scroll(amount int) {
 	l.currentLine += amount
 	if l.currentLine < l.height-1 {
-		l.currentLine = l.height - 1
+		if l.height >= len(l.lines) {
+			l.currentLine = len(l.lines) - 1
+		} else {
+			l.currentLine = l.height - 1
+		}
 	} else if l.currentLine >= len(l.lines)-1 {
 		l.currentLine = len(l.lines) - 1
 	}
-	l.currentLineOffsetPercentage = float64(l.currentLineOffset) / float64(l.getCurrentLineTotal())
 	l.contentUpdated.Store(true)
 }
 
@@ -78,22 +78,9 @@ func (l *Log) GotoBottom() {
 	l.contentUpdated.Store(true)
 }
 
-func (l *Log) recalculateCurrentLineOffset() {
-	if l.currentLineOffset == 0 {
-		return
-	}
-	currentLineTotal := l.getCurrentLineTotal()
-
-	l.currentLineOffset = int(math.Round(l.currentLineOffsetPercentage * float64(currentLineTotal)))
-	if l.currentLineOffset >= currentLineTotal {
-		l.currentLineOffset = 0
-	}
-}
-
 func (l *Log) SetSize(width int, height int) {
 	l.width = width
 	l.height = height
-	l.recalculateCurrentLineOffset()
 	l.contentUpdated.Store(true)
 }
 
