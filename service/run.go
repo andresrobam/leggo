@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sync"
 
@@ -16,33 +17,58 @@ var isDockerComposeRegex = regexp.MustCompile("^ *docker[ -]compose +.*$")
 var hasAnsiFlagRegex = regexp.MustCompile(`(^\s*docker[ -]compose +.*--ansi)(=| +)(\S+)(.*$)`)
 var ansiFlagAddRegex = regexp.MustCompile("(^ *docker[ -])(compose)( +.*$)")
 
-func forceDockerComposeAnsi(command *string) string {
-	if isDockerComposeRegex.MatchString(*command) {
-		if hasAnsiFlagRegex.MatchString(*command) {
+func forceDockerComposeAnsi(command string) string {
+	if isDockerComposeRegex.MatchString(command) {
+		if hasAnsiFlagRegex.MatchString(command) {
 			// change ansi param value to "always"
-			return hasAnsiFlagRegex.ReplaceAllString(*command, "$1=always$4")
+			return hasAnsiFlagRegex.ReplaceAllString(command, "$1=always$4")
 		} else {
 			// add ansi param with value "always"
-			return ansiFlagAddRegex.ReplaceAllString(*command, "$1$2 --ansi=always$3")
+			return ansiFlagAddRegex.ReplaceAllString(command, "$1$2 --ansi=always$3")
 		}
 	}
-	return *command
+	return command
+}
+
+func (s *Service) transform(command string) string {
+	if s.Configuration.ForceDockerComposeAnsi {
+		return forceDockerComposeAnsi(command)
+	}
+	return command
+}
+
+type Command struct {
+	Command  string
+	Path     string
+	Unique   string   // TODO: implement
+	Requires []string // TODO: implement
+	Kill     bool
 }
 
 func (s *Service) StartService() {
-	var command string
-	if s.Configuration.ForceDockerComposeAnsi {
-		command = forceDockerComposeAnsi(&s.Commands[s.ActiveCommandIndex])
-	} else {
-		command = s.Commands[s.ActiveCommandIndex]
-	}
+	c := s.Commands[s.ActiveCommandIndex]
+
+	command := s.transform(c.Command)
+
 	s.cmd = exec.Command(s.Configuration.CommandExecutor, s.Configuration.CommandArgument, command)
 	s.cmd.SysProcAttr = sys.GetSysProcAttr()
-	var pathMessage string
-	if s.Path != "" {
+
+	if c.Path != "" {
+		if filepath.IsAbs(c.Path) {
+			s.cmd.Dir = c.Path
+		} else {
+			var pathErr error
+			s.cmd.Dir, pathErr = filepath.Abs(filepath.Join(s.Path, c.Path))
+			if pathErr != nil {
+				s.addSyserrLine(fmt.Sprintf("Error: getting absolute path %s", pathErr))
+				return
+			}
+		}
+	} else {
 		s.cmd.Dir = s.Path
-		pathMessage = fmt.Sprintf(" in %s", s.Path)
 	}
+	pathMessage := fmt.Sprintf(" in %s", s.Path)
+
 	outPipe, err := s.cmd.StdoutPipe()
 	if err != nil {
 		s.addSyserrLine(fmt.Sprintf("Error: opening stdout pipe %s", err))
@@ -120,9 +146,17 @@ func (s *Service) EndService() {
 	s.TermAttemptCount++
 	s.State = StateStopping
 	s.addSysoutLine("Closing process")
-	if err := sys.EndProcess(s.cmd.Process, s.TermAttemptCount); err != nil {
+	if err := s.end(); err != nil {
 		s.addSyserrLine(fmt.Sprintf("Error closing process: %s", err))
 	} else {
 		go s.Program.Send(ServiceStoppingMsg{})
+	}
+}
+
+func (s *Service) end() error {
+	if s.Commands[s.ActiveCommandIndex].Kill || s.TermAttemptCount > 2 {
+		return sys.Kill(s.cmd.Process)
+	} else {
+		return sys.GracefulStop(s.cmd.Process)
 	}
 }

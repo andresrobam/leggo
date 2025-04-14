@@ -11,6 +11,10 @@ func GetSysProcAttr() *syscall.SysProcAttr {
 	return &syscall.SysProcAttr{Setpgid: true}
 }
 
-func EndProcess(process *os.Process, termAttempt int) error {
+func GracefulStop(process *os.Process) error {
+	return process.Signal(syscall.SIGKILL)
+}
+
+func Kill(process *os.Process) error {
 	return process.Signal(syscall.SIGTERM)
 }

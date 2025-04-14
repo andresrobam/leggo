@@ -33,7 +33,7 @@ type Service struct {
 	Key                string
 	Name               string
 	Path               string
-	Commands           []string
+	Commands           []Command
 	State              State
 	cmd                *exec.Cmd
 	outPipe            *io.ReadCloser
@@ -47,7 +47,7 @@ type Service struct {
 	Log                *log.Log
 }
 
-func New(key string, name string, path string, commands []string, configuration *config.Config) Service {
+func New(key string, name string, path string, commands []Command, configuration *config.Config) Service {
 	return Service{
 		Key:           key,
 		Name:          name,
@@ -66,24 +66,24 @@ type ServiceStoppingMsg struct{}
 
 type ServiceStartedMsg struct{}
 
-func (s *Service) addOutput(addition *string, endLine bool, lineType LineType) {
+func (s *Service) addOutput(addition string, endLine bool, lineType LineType) {
 	s.Log.AddContent(addition, endLine)
 }
 
 func (s *Service) addStdout(addition string, endLine bool) {
-	s.addOutput(&addition, endLine, LineTypeStdout)
+	s.addOutput(addition, endLine, LineTypeStdout)
 }
 
 func (s *Service) addSterr(addition string, endLine bool) {
-	s.addOutput(&addition, endLine, LineTypeStderr)
+	s.addOutput(addition, endLine, LineTypeStderr)
 }
 
 func (s *Service) addSyserrLine(addition string) {
-	s.addOutput(&addition, true, LineTypeSyserr)
+	s.addOutput(addition, true, LineTypeSyserr)
 }
 
 func (s *Service) addSysoutLine(addition string) {
-	s.addOutput(&addition, true, LineTypeSysout)
+	s.addOutput(addition, true, LineTypeSysout)
 }
 
 func writeFromPipe(pipe *io.ReadCloser, isErrorPipe bool, s *Service, wg *sync.WaitGroup) {

@@ -19,7 +19,7 @@ type Log struct {
 	configuration  *config.Config
 	contentMutex   sync.RWMutex
 	contentUpdated atomic.Bool
-	view           *string
+	view           string
 	size           int
 }
 
@@ -38,7 +38,7 @@ func (l *Log) GetContentSize() int {
 
 func (l *Log) View() (string, bool) {
 	if !l.contentUpdated.Swap(false) {
-		return *l.view, false
+		return l.view, false
 	}
 	l.contentMutex.RLock()
 	defer l.contentMutex.RUnlock()
@@ -46,8 +46,8 @@ func (l *Log) View() (string, bool) {
 		Height(l.height).
 		MaxWidth(l.width).
 		MaxHeight(l.height).
-		Render(strings.Join(*l.getVisibleLines(), "\n"))
-	l.view = &content
+		Render(strings.Join(l.getVisibleLines(), "\n"))
+	l.view = content
 	return content, true
 }
 
@@ -83,11 +83,11 @@ func (l *Log) SetSize(width int, height int) {
 	l.contentUpdated.Store(true)
 }
 
-func (l *Log) getVisibleLines() *[]string {
+func (l *Log) getVisibleLines() []string {
 	visibleLines := make([]string, l.height, l.height)
 
 	if len(l.lines) == 0 {
-		return &visibleLines
+		return visibleLines
 	}
 
 	screenLine := l.height - 1
@@ -107,7 +107,7 @@ outer:
 		visibleLines = visibleLines[screenLine+1:]
 	}
 
-	return &visibleLines
+	return visibleLines
 }
 
 func (l *Log) clearOldLines() {
@@ -134,17 +134,17 @@ func (l *Log) clearOldLines() {
 	l.clampCurrentLine()
 }
 
-func (l *Log) AddContent(addition *string, endLine bool) {
+func (l *Log) AddContent(addition string, endLine bool) {
 	l.contentMutex.Lock()
 	defer l.contentMutex.Unlock()
 	atLastLine := l.currentLine == (len(l.lines) - 1)
 	if l.lastLineOpen {
-		l.lines[len(l.lines)-1] += *addition
+		l.lines[len(l.lines)-1] += addition
 		if endLine {
 			l.lastLineOpen = false
 		}
 	} else {
-		l.lines = append(l.lines, *addition)
+		l.lines = append(l.lines, addition)
 		if !endLine {
 			l.lastLineOpen = true
 		}

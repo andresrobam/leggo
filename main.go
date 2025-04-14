@@ -341,7 +341,7 @@ type contextDefinition struct {
 	Services map[string]struct {
 		Name     string
 		Path     string
-		Commands []string
+		Commands []service.Command
 		Requires []string
 	} `yaml:"services"`
 }
@@ -489,7 +489,6 @@ func main() {
 // TODO: more splitting of functions and modules and files and shit
 // TODO: ability to grep logs
 // TODO: pretty header
-// TODO: handle too many elements on header for viewport width
 // TODO: handle too many elements on footer for viewport width
 // TODO: better keyboard controls
 // TODO: possibility to add timestamps to system messages
@@ -497,10 +496,11 @@ func main() {
 // TODO: remember timestamp rules per context service
 // TODO: style sysout messages
 // TODO: style syserr messages
-// TODO: system to make sure some services arent started in parallel
+// TODO: system to make sure somdde services arent started in parallel
 // TODO: requirements (one service can depend on another)
 // TODO: healthchecks (that make sure requirements are complete)
 // TODO: allow overriding success codes for commands
-// TODO: add optional context name override param
 // TODO: show quitting status somewhere
 // TODO: filter to only show running tabs
+// TODO: automatically send second stop after 30s and then every 5s after that
+// TODO: block sending another start/stop for 1s
