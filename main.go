@@ -17,7 +17,9 @@ import (
 )
 
 type model struct {
-	ready bool
+	ready  bool
+	width  int
+	height int
 }
 
 func (m model) Init() tea.Cmd {
@@ -168,8 +170,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.WindowSizeMsg:
-		headerHeight := lipgloss.Height(m.headerView())
-		footerHeight := lipgloss.Height(m.footerView())
+		headerHeight := lipgloss.Height(m.headerView(msg.Width))
+		footerHeight := lipgloss.Height(m.footerView(msg.Width))
+		m.height = msg.Height
+		m.width = msg.Width
 
 		activeMutex.RLock()
 
@@ -199,16 +203,20 @@ func (m model) View() string {
 	if clearScreen {
 		//go p.Send(tea.ClearScreen())
 	}
-	return fmt.Sprintf("%s\n%s\n%s", m.headerView(), logView, m.footerView())
+	return fmt.Sprintf("%s\n%s\n%s", m.headerView(m.width), logView, m.footerView(m.width))
 }
 
 var cmdStyle = lipgloss.NewStyle().
-	BorderStyle(lipgloss.NormalBorder()).
-	BorderForeground(lipgloss.Color("63"))
+	Foreground(lipgloss.Color("#cccccc")).
+	Background(lipgloss.Color("#555555"))
+
+var altCmdStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#cccccc")).
+	Background(lipgloss.Color("#444444"))
 
 var activeCmdStyle = lipgloss.NewStyle().
-	BorderStyle(lipgloss.NormalBorder()).
-	BorderForeground(lipgloss.Color("9"))
+	Foreground(lipgloss.Color("#ffffff")).
+	Background(lipgloss.Color("#3333dd"))
 
 var stoppedStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color("#ff0000"))
@@ -217,9 +225,9 @@ var runningStyle = lipgloss.NewStyle().
 var stoppingStyle = lipgloss.NewStyle().
 	Foreground(lipgloss.Color("#ffff00"))
 
-func (m model) headerView() string {
+func (m model) headerView(width int) string {
 
-	titles := make([]string, len(services))
+	var title string
 	for i := range services {
 		var tabStyle *lipgloss.Style
 		var stateStyle *lipgloss.Style
@@ -235,12 +243,14 @@ func (m model) headerView() string {
 		services[i].StateMutex.RUnlock()
 		if i == activeIndex {
 			tabStyle = &activeCmdStyle
-		} else {
+		} else if i%2 == 0 {
 			tabStyle = &cmdStyle
+		} else {
+			tabStyle = &altCmdStyle
 		}
-		titles[i] = tabStyle.Render(stateStyle.Render("● ")+services[i].Name) + "\n"
+		title += tabStyle.Render(" ") + stateStyle.Inherit(*tabStyle).Render("●") + tabStyle.Render(" "+services[i].Name+" ")
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Center, titles...)
+	return lipgloss.NewStyle().Width(width).Render(title)
 }
 
 func runningServiceCount() (count int) {
@@ -294,7 +304,7 @@ var logSizeTransitionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statu
 var pidStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarTextColor)).Background(lipgloss.Color(statusBarColor3))
 var pidTransitionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarColor3))
 
-func (m model) footerView() string {
+func (m model) footerView(width int) string {
 
 	var pid string
 	if activeService.Pid != 0 {
@@ -493,3 +503,4 @@ func main() {
 // TODO: allow overriding success codes for commands
 // TODO: add optional context name override param
 // TODO: show quitting status somewhere
+// TODO: filter to only show running tabs

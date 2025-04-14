@@ -26,14 +26,10 @@ type Log struct {
 func New(configuration *config.Config) *Log {
 	log := &Log{
 		configuration: configuration,
-		lines:         make([]string, 0, configuration.InitialLineCapacity),
+		lines:         make([]string, 0, 50),
 	}
 	log.contentUpdated.Store(true)
 	return log
-}
-
-func (l *Log) getCurrentLineTotal() int {
-	return strings.Count(ansi.Hardwrap(l.lines[l.currentLine], l.width, true), "\n") + 1
 }
 
 func (l *Log) GetContentSize() int {
@@ -47,7 +43,6 @@ func (l *Log) View() (string, bool) {
 	l.contentMutex.RLock()
 	defer l.contentMutex.RUnlock()
 	content := lipgloss.NewStyle().
-		Width(l.width).
 		Height(l.height).
 		MaxWidth(l.width).
 		MaxHeight(l.height).
@@ -56,8 +51,7 @@ func (l *Log) View() (string, bool) {
 	return content, true
 }
 
-func (l *Log) Scroll(amount int) {
-	l.currentLine += amount
+func (l *Log) clampCurrentLine() {
 	if l.currentLine < l.height-1 {
 		if l.height >= len(l.lines) {
 			l.currentLine = len(l.lines) - 1
@@ -67,6 +61,11 @@ func (l *Log) Scroll(amount int) {
 	} else if l.currentLine >= len(l.lines)-1 {
 		l.currentLine = len(l.lines) - 1
 	}
+}
+
+func (l *Log) Scroll(amount int) {
+	l.currentLine += amount
+	l.clampCurrentLine()
 	l.contentUpdated.Store(true)
 }
 
@@ -132,6 +131,7 @@ func (l *Log) clearOldLines() {
 	}
 	l.lines = l.lines[linesToDelete:]
 	l.currentLine -= linesToDelete
+	l.clampCurrentLine()
 }
 
 func (l *Log) AddContent(addition *string, endLine bool) {
@@ -145,11 +145,6 @@ func (l *Log) AddContent(addition *string, endLine bool) {
 		}
 	} else {
 		l.lines = append(l.lines, *addition)
-		//if len(l.lines) == cap(l.lines) {
-		//	newSlice := make([]string, int(float32(len(l.lines))*l.configuration.LineCapacityMultiplier))
-		//	copy(newSlice, l.lines)
-		//	l.lines = newSlice
-		//}
 		if !endLine {
 			l.lastLineOpen = true
 		}
