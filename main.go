@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -293,20 +292,28 @@ var statusBarBackgroundColors = []color.Color{
 	lipgloss.Color("#1262e3"),
 	lipgloss.Color("#123ce3"),
 	lipgloss.Color("#120ce3"),
+	lipgloss.Color("#0000c3"),
 }
 
 func (m model) footerView(width int) string {
-
-	pid := "-"
-	if activeService.Pid != 0 {
-		pid = strconv.Itoa(activeService.Pid)
-	}
 
 	statusBarItems := []string{
 		context.Name,
 		fmt.Sprintf("%d/%d running", runningServiceCount(), len(services)),
 		fmt.Sprintf("Log: %s", formatDataSize(activeService.Log.GetContentSize())),
-		fmt.Sprintf("PID %s", pid),
+	}
+
+	if activeService.Pid != 0 {
+		statusBarItems = append(statusBarItems, fmt.Sprintf("PID %d", activeService.Pid))
+	}
+
+	var status string
+
+	if activeService.State == service.StateStopping {
+		status = "Stopping"
+	}
+	if status != "" {
+		statusBarItems = append(statusBarItems, status)
 	}
 
 	if quitting {
