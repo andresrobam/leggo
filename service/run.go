@@ -153,8 +153,20 @@ func (s *Service) EndService() {
 	}
 }
 
+func (c Command) shouldKill() bool {
+	if c.Kill {
+		return true
+	}
+	for _, regex := range sys.ShouldKillMatchingRegex() {
+		if regexp.MustCompile(regex).MatchString(c.Command) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) end() error {
-	if s.Commands[s.ActiveCommandIndex].Kill || s.TermAttemptCount > 2 {
+	if s.Commands[s.ActiveCommandIndex].shouldKill() || s.TermAttemptCount > 2 {
 		return sys.Kill(s.cmd.Process)
 	} else {
 		return sys.GracefulStop(s.cmd.Process)

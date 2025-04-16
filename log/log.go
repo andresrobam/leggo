@@ -148,9 +148,9 @@ func (l *Log) AddContent(addition string, endLine bool) {
 		if !endLine {
 			l.lastLineOpen = true
 		}
-	}
-	if endLine && atLastLine {
-		l.currentLine++
+		if atLastLine {
+			l.currentLine++
+		}
 	}
 	l.clearOldLines()
 	l.contentUpdated.Store(true)

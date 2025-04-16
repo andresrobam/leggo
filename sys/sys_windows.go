@@ -32,3 +32,7 @@ func GracefulStop(process *os.Process) error {
 func Kill(process *os.Process) error {
 	return exec.Command("taskkill", "/t", "/f", "/pid", strconv.Itoa(process.Pid)).Run()
 }
+
+func ShouldKillMatchingRegex() []string {
+	return []string{"^(\\.|\\.\\/)?(gradle|mvn)w?.*", "^javaw? .*"}
+}

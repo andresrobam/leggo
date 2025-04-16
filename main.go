@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -199,10 +200,7 @@ func (m model) View() string {
 	}
 	activeMutex.RLock()
 	defer activeMutex.RUnlock()
-	logView, clearScreen := activeService.Log.View()
-	if clearScreen {
-		//go p.Send(tea.ClearScreen())
-	}
+	logView, _ := activeService.Log.View()
 	return fmt.Sprintf("%s\n%s\n%s", m.headerView(m.width), logView, m.footerView(m.width))
 }
 
@@ -464,6 +462,10 @@ func main() {
 	}
 	activeService = services[activeIndex]
 
+	if runtime.GOOS == "windows" {
+		os.Setenv("TEA_STANDARD_RENDERER", "true")
+	}
+
 	p = tea.NewProgram(
 		model{},
 		tea.WithAltScreen(),
@@ -487,7 +489,7 @@ func main() {
 }
 
 // TODO: more splitting of functions and modules and files and shit
-// TODO: ability to grep logs
+// TODO: ability to search logs (case sensitive, case insensitive, regex)
 // TODO: pretty header
 // TODO: handle too many elements on footer for viewport width
 // TODO: better keyboard controls
@@ -496,7 +498,7 @@ func main() {
 // TODO: remember timestamp rules per context service
 // TODO: style sysout messages
 // TODO: style syserr messages
-// TODO: system to make sure somdde services arent started in parallel
+// TODO: system to make sure some services arent started in parallel
 // TODO: requirements (one service can depend on another)
 // TODO: healthchecks (that make sure requirements are complete)
 // TODO: allow overriding success codes for commands
