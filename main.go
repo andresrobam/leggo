@@ -292,6 +292,7 @@ var statusBarBackgroundColors = []color.Color{
 	lipgloss.Color("#128ce3"),
 	lipgloss.Color("#1262e3"),
 	lipgloss.Color("#123ce3"),
+	lipgloss.Color("#120ce3"),
 }
 
 func (m model) footerView(width int) string {
@@ -308,11 +309,13 @@ func (m model) footerView(width int) string {
 		fmt.Sprintf("PID %s", pid),
 	}
 
+	if quitting {
+		statusBarItems = slices.Insert(statusBarItems, 1, "Quitting")
+	}
+
 	renderItems := make([]string, len(statusBarItems)*2)
 
 	for i, item := range statusBarItems {
-		// var contextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarTextColor)).Background(lipgloss.Color(statusBarColor0))
-		// var contextTransitionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarColor0)).Background(lipgloss.Color(statusBarColor1))
 		renderItems[i*2] = lipgloss.NewStyle().
 			Foreground(statusBarTextColor).
 			Background(statusBarBackgroundColors[i]).
@@ -330,8 +333,6 @@ func (m model) footerView(width int) string {
 
 	return lipgloss.JoinHorizontal(lipgloss.Center, renderItems...)
 }
-
-// TODO: all of the status bar style stuff could be a for loop
 
 var context *Context
 var services []*service.Service
@@ -511,7 +512,6 @@ func main() {
 // TODO: requirements (one service can depend on another)
 // TODO: healthchecks (that make sure requirements are complete)
 // TODO: allow overriding success codes for commands
-// TODO: show quitting status somewhere
 // TODO: filter to only show running tabs
 // TODO: automatically send second stop after 30s and then every 5s after that
 // TODO: make windows gradle/maven/java kill optional
