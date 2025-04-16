@@ -127,6 +127,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !quitting {
 					activeService.StartService()
 				}
+			case service.StateStarting:
+				activeService.EndService()
 			case service.StateRunning:
 				activeService.EndService()
 			case service.StateStopping:
@@ -236,6 +238,8 @@ func (m model) headerView(width int) string {
 			stateStyle = &runningStyle
 		case service.StateStopping:
 			stateStyle = &stoppingStyle
+		case service.StateStarting:
+			stateStyle = &stoppingStyle
 		default:
 			stateStyle = &stoppedStyle
 		}
@@ -311,6 +315,8 @@ func (m model) footerView(width int) string {
 
 	if activeService.State == service.StateStopping {
 		status = "Stopping"
+	} else if activeService.State == service.StateStarting {
+		status = "Starting"
 	}
 	if status != "" {
 		statusBarItems = append(statusBarItems, status)
@@ -353,10 +359,11 @@ var activeMutex sync.RWMutex
 type contextDefinition struct {
 	Name     string `yaml:"name"`
 	Services map[string]struct {
-		Name     string
-		Path     string
-		Commands []service.Command
-		Requires []string
+		Name              string
+		Path              string
+		Commands          []service.Command
+		Healthcheck       string
+		HealthcheckPeriod int `yaml:"healthcheckPeriod"`
 	} `yaml:"services"`
 }
 
@@ -467,7 +474,7 @@ func main() {
 			servicePath, _ = filepath.Abs(filepath.Join(contextDir, servicePath))
 		}
 
-		newService := service.New(serviceKey, name, servicePath, s.Commands, &configuration)
+		newService := service.New(serviceKey, name, servicePath, s.Commands, &configuration, s.Healthcheck, s.HealthcheckPeriod)
 		services[i] = &newService
 	}
 
@@ -517,7 +524,6 @@ func main() {
 // TODO: style syserr messages
 // TODO: system to make sure some services arent started in parallel
 // TODO: requirements (one service can depend on another)
-// TODO: healthchecks (that make sure requirements are complete)
 // TODO: allow overriding success codes for commands
 // TODO: filter to only show running tabs
 // TODO: automatically send second stop after 30s and then every 5s after that

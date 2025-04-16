@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/andresrobam/leggo/sys"
 )
@@ -89,15 +90,58 @@ func (s *Service) StartService() {
 		return
 	}
 	s.Pid = s.cmd.Process.Pid
+	s.State = StateStarting
 	s.addSysoutLine(fmt.Sprintf("Process started with PID: %d", s.Pid))
 
 	wg := new(sync.WaitGroup)
 	wg.Add(2)
 	go writeFromPipe(&outPipe, false, s, wg)
 	go writeFromPipe(&errPipe, true, s, wg)
-	s.State = StateRunning
-	go s.Program.Send(ServiceStartedMsg{})
+
+	if s.ActiveCommandIndex == len(s.Commands)-1 {
+		if s.HealthCheck != "" {
+			go s.CheckHealth()
+		} else {
+			s.State = StateRunning
+			go s.Program.Send(ServiceStartedMsg{})
+		}
+	}
 	go handleRunningProcess(wg, &outPipe, s, &errPipe)
+}
+
+func (s *Service) CheckHealth() {
+
+	if s.State != StateStarting {
+		return
+	}
+
+	hc := exec.Command(s.Configuration.CommandExecutor, s.Configuration.CommandArgument, s.HealthCheck)
+	hc.SysProcAttr = sys.GetSysProcAttr()
+	hc.Dir = s.Path
+	s.addSysoutLine(fmt.Sprintf("Running healthcheck \"%s\"", s.HealthCheck))
+	if err := hc.Run(); err != nil {
+		s.addSyserrLine(fmt.Sprintf("Error running healthcheck: %s", err))
+	} else {
+		if hc.ProcessState.ExitCode() == 0 {
+			s.StateMutex.Lock()
+			defer s.StateMutex.Unlock()
+			if s.State != StateStarting {
+				return
+			}
+			s.addSysoutLine("Healthcheck passed")
+			s.State = StateRunning
+			go s.Program.Send(ServiceStartedMsg{service: s.Key})
+			return
+		}
+		s.addSyserrLine(fmt.Sprintf("Healthcheck failed with exit code: %d", hc.ProcessState.ExitCode()))
+	}
+	healthCheckPeriod := s.HealthCheckPeriod
+	if healthCheckPeriod == 0 {
+		healthCheckPeriod = 1
+	}
+	<-time.After(time.Duration(healthCheckPeriod) * time.Second)
+	s.CheckHealth()
+
 }
 
 func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service, errPipe *io.ReadCloser) {
@@ -105,7 +149,6 @@ func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service
 	wg.Wait()
 	s.StateMutex.Lock()
 	wasStopping := s.State == StateStopping
-	s.State = StateStopping
 	if err := (*outPipe).Close(); err != nil && err.Error() != "close |0: file already closed" {
 		s.addSyserrLine(fmt.Sprintf("Error closing stdout pipe: %s", err))
 	}
@@ -137,7 +180,7 @@ func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service
 		go s.StartService()
 	} else {
 		s.State = StateStopped
-		go s.Program.Send(ServiceStoppedMsg{})
+		go s.Program.Send(ServiceStoppedMsg{service: s.Key})
 	}
 	s.StateMutex.Unlock()
 }
@@ -149,7 +192,7 @@ func (s *Service) EndService() {
 	if err := s.end(); err != nil {
 		s.addSyserrLine(fmt.Sprintf("Error closing process: %s", err))
 	} else {
-		go s.Program.Send(ServiceStoppingMsg{})
+		go s.Program.Send(ServiceStoppingMsg{service: s.Key})
 	}
 }
 

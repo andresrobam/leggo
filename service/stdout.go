@@ -16,6 +16,7 @@ type State int
 
 const (
 	StateStopped State = iota
+	StateStarting
 	StateRunning
 	StateStopping
 )
@@ -45,26 +46,36 @@ type Service struct {
 	ActiveCommandIndex int
 	Configuration      *config.Config
 	Log                *log.Log
+	HealthCheck        string
+	HealthCheckPeriod  int
 }
 
-func New(key string, name string, path string, commands []Command, configuration *config.Config) Service {
+func New(key string, name string, path string, commands []Command, configuration *config.Config, healthCheck string, healthCheckPeriod int) Service {
 	return Service{
-		Key:           key,
-		Name:          name,
-		Path:          path,
-		Commands:      commands,
-		Configuration: configuration,
-		Log:           log.New(configuration),
+		Key:               key,
+		Name:              name,
+		Path:              path,
+		Commands:          commands,
+		Configuration:     configuration,
+		Log:               log.New(configuration),
+		HealthCheck:       healthCheck,
+		HealthCheckPeriod: healthCheckPeriod,
 	}
 }
 
-type ContentUpdateMsg struct{}
+type ContentUpdateMsg struct{} // TODO: remove this?
 
-type ServiceStoppedMsg struct{}
+type ServiceStoppedMsg struct {
+	service string
+}
 
-type ServiceStoppingMsg struct{}
+type ServiceStoppingMsg struct {
+	service string
+}
 
-type ServiceStartedMsg struct{}
+type ServiceStartedMsg struct {
+	service string
+}
 
 func (s *Service) addOutput(addition string, endLine bool, lineType LineType) {
 	s.Log.AddContent(addition, endLine)
