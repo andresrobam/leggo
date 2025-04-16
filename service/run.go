@@ -42,7 +42,7 @@ func (s *Service) transform(command string) string {
 type Command struct {
 	Command  string
 	Path     string
-	Unique   string // TODO: implement
+	Lock     string
 	Requires []string
 	Kill     bool
 }
@@ -57,7 +57,7 @@ func (s *Service) StartService() {
 		for i := range s.Commands {
 			s.State = StateStarting
 			for _, requiredService := range s.Commands[i].Requires {
-				if !slices.Contains(s.WaitList, requiredService) {
+				if !slices.Contains(s.WaitList, requiredService) && Services[requiredService].State != StateRunning {
 					s.WaitList = append(s.WaitList, requiredService)
 					s.addSysoutLine(fmt.Sprintf("Starting required service: %s", requiredService))
 					go s.Program.Send(StartServiceMsg{Service: requiredService})
@@ -185,6 +185,7 @@ func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service
 	s.Pid = 0
 
 	exitCode := s.cmd.ProcessState.ExitCode()
+	s.cmd = nil
 	message := fmt.Sprintf("Process finished with exit code: %d", exitCode)
 	s.addSysoutLine(message)
 
@@ -217,11 +218,19 @@ func (s *Service) EndService() {
 	s.State = StateStopping
 	s.WaitList = []string{}
 	s.addSysoutLine("Closing process")
-	if err := s.end(); err != nil {
-		s.addSyserrLine(fmt.Sprintf("Error closing process: %s", err))
+	if s.cmd != nil && s.cmd.Process != nil {
+		if err := s.end(); err != nil {
+			s.addSyserrLine(fmt.Sprintf("Error closing process: %s", err))
+		} else {
+			go s.Program.Send(ServiceStoppingMsg{Service: s.Key})
+		}
 	} else {
-		go s.Program.Send(ServiceStoppingMsg{Service: s.Key})
+		s.TermAttemptCount = 0
+		s.WaitList = []string{}
+		s.State = StateStopped
+		go s.Program.Send(ServiceStoppedMsg{Service: s.Key})
 	}
+
 }
 
 func (c Command) shouldKill() bool {
@@ -237,9 +246,9 @@ func (c Command) shouldKill() bool {
 }
 
 func (s *Service) end() error {
+
 	if s.Commands[s.ActiveCommandIndex].shouldKill() || s.TermAttemptCount > 2 {
 		return sys.Kill(s.cmd.Process)
-	} else {
-		return sys.GracefulStop(s.cmd.Process)
 	}
+	return sys.GracefulStop(s.cmd.Process)
 }

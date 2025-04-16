@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/andresrobam/leggo/config"
 	"github.com/andresrobam/leggo/service"
@@ -206,18 +207,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-func startService(service string) {
+func startService(serviceKey string) {
 	if quitting {
 		return
 	}
-	for i := range services {
-		if services[i].Key == service {
-			services[i].StateMutex.Lock()
-			services[i].StartService()
-			services[i].StateMutex.Unlock()
-			break
-		}
-	}
+	service := service.Services[serviceKey]
+	service.StateMutex.Lock()
+	service.StartService()
+	service.StateMutex.Unlock()
 }
 
 func (m model) View() string {
@@ -339,7 +336,11 @@ func (m model) footerView(width int) string {
 	if activeService.State == service.StateStopping {
 		status = "Stopping"
 	} else if activeService.State == service.StateStarting {
-		status = "Starting"
+		if len(activeService.WaitList) != 0 {
+			status = "Waiting for: " + strings.Join(activeService.WaitList, ", ")
+		} else {
+			status = "Starting"
+		}
 	}
 	if status != "" {
 		statusBarItems = append(statusBarItems, status)
@@ -481,6 +482,8 @@ func main() {
 
 	contextDir := filepath.Dir(absoluteFilePath)
 	services = make([]*service.Service, len(finalServiceKeys))
+	service.Services = make(map[string]*service.Service)
+	service.Locks = make(map[string]*sync.Mutex)
 	for i, serviceKey := range finalServiceKeys {
 		var name string
 		s := contextDefinition.Services[serviceKey]
@@ -499,6 +502,13 @@ func main() {
 
 		newService := service.New(serviceKey, name, servicePath, s.Commands, &configuration, s.Healthcheck, s.HealthcheckPeriod)
 		services[i] = &newService
+		service.Services[serviceKey] = &newService
+		for j := range newService.Commands {
+			lock := newService.Commands[j].Lock
+			if service.Locks[lock] == nil {
+				service.Locks[lock] = &sync.Mutex{}
+			}
+		}
 	}
 
 	if context.Settings.ActiveService != "" {
@@ -520,7 +530,13 @@ func main() {
 	for i := range services {
 		services[i].Program = p
 	}
-
+	go func() {
+		ticker := time.NewTicker(time.Duration(configuration.RefreshMillis) * time.Millisecond)
+		defer ticker.Stop()
+		for range ticker.C {
+			p.Send(service.ContentUpdateMsg{})
+		}
+	}()
 	if _, err := p.Run(); err != nil {
 		fmt.Println("Error running bubbletea program: ", err)
 		os.Exit(1)

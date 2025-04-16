@@ -52,6 +52,9 @@ type Service struct {
 	WaitList           []string
 }
 
+var Services map[string]*Service
+var Locks map[string]*sync.Mutex
+
 func New(key string, name string, path string, commands []Command, configuration *config.Config, healthCheck string, healthCheckPeriod int) Service {
 	return Service{
 		Key:               key,
@@ -80,6 +83,8 @@ type ServiceStartedMsg struct {
 type StartServiceMsg struct {
 	Service string
 }
+
+type ContentUpdateMsg struct{}
 
 func (s *Service) DoneWaiting(service string) {
 	i := slices.Index(s.WaitList, service)
