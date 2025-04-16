@@ -524,3 +524,4 @@ func main() {
 // TODO: make windows gradle/maven/java kill optional
 // TODO: add kill options as regex to config
 // TODO: add command replacement regex to config
+// TODO: test
