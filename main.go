@@ -2,10 +2,12 @@ package main
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -283,44 +285,50 @@ func formatDataSize(bytes int) string {
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.3f", size), "0"), ".") + string(UNITS[unitIndex])
 }
 
-const statusBarTextColor = "#dddddd"
+var statusBarTextColor = lipgloss.Color("#dddddd")
 
-const statusBarColor0 = "#12afe3"
-const statusBarColor1 = "#128ce3"
-const statusBarColor2 = "#1262e3"
-const statusBarColor3 = "#123ce3"
-
-var contextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarTextColor)).Background(lipgloss.Color(statusBarColor0))
-var contextTransitionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarColor0)).Background(lipgloss.Color(statusBarColor1))
-
-var runningCountStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarTextColor)).Background(lipgloss.Color(statusBarColor1))
-var runningCountTransitionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarColor1)).Background(lipgloss.Color(statusBarColor2))
-
-var logSizeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarTextColor)).Background(lipgloss.Color(statusBarColor2))
-var logSizeTransitionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarColor2)).Background(lipgloss.Color(statusBarColor3))
-
-var pidStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarTextColor)).Background(lipgloss.Color(statusBarColor3))
-var pidTransitionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarColor3))
+var statusBarBackgroundColors = []color.Color{
+	lipgloss.Color("#12afe3"),
+	lipgloss.Color("#128ce3"),
+	lipgloss.Color("#1262e3"),
+	lipgloss.Color("#123ce3"),
+}
 
 func (m model) footerView(width int) string {
 
-	var pid string
+	pid := "-"
 	if activeService.Pid != 0 {
-		pid = pidStyle.Render(fmt.Sprintf(" PID %d ", activeService.Pid))
-	} else {
-		pid = pidStyle.Render(" PID - ")
+		pid = strconv.Itoa(activeService.Pid)
 	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Center,
-		contextStyle.Render(" "+context.Name+" "),
-		contextTransitionStyle.Render("\uE0B0"),
-		runningCountStyle.Render(fmt.Sprintf(" %d/%d running ", runningServiceCount(), len(services))),
-		runningCountTransitionStyle.Render("\uE0B0"),
-		logSizeStyle.Render(fmt.Sprintf(" Log: %s ", formatDataSize(activeService.Log.GetContentSize()))),
-		logSizeTransitionStyle.Render("\uE0B0"),
-		pid,
-		pidTransitionStyle.Render("\uE0B0"),
-	)
+	statusBarItems := []string{
+		context.Name,
+		fmt.Sprintf("%d/%d running", runningServiceCount(), len(services)),
+		fmt.Sprintf("Log: %s", formatDataSize(activeService.Log.GetContentSize())),
+		fmt.Sprintf("PID %s", pid),
+	}
+
+	renderItems := make([]string, len(statusBarItems)*2)
+
+	for i, item := range statusBarItems {
+		// var contextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarTextColor)).Background(lipgloss.Color(statusBarColor0))
+		// var contextTransitionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(statusBarColor0)).Background(lipgloss.Color(statusBarColor1))
+		renderItems[i*2] = lipgloss.NewStyle().
+			Foreground(statusBarTextColor).
+			Background(statusBarBackgroundColors[i]).
+			Render(" " + item + " ")
+		transitionStyle := lipgloss.NewStyle().
+			Foreground(statusBarBackgroundColors[i])
+
+		if i != len(statusBarItems)-1 {
+			transitionStyle = transitionStyle.
+				Background(statusBarBackgroundColors[i+1])
+		}
+
+		renderItems[i*2+1] = transitionStyle.Render("\uE0B0")
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Center, renderItems...)
 }
 
 // TODO: all of the status bar style stuff could be a for loop
