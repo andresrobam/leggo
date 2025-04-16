@@ -492,7 +492,8 @@ func main() {
 // TODO: ability to search logs (case sensitive, case insensitive, regex)
 // TODO: pretty header
 // TODO: handle too many elements on footer for viewport width
-// TODO: better keyboard controls
+// TODO: more keyboard controls (page up, page down, half page up, half page down)
+// TODO: show keyboard commands somewhere
 // TODO: possibility to add timestamps to system messages
 // TODO: possibility to add timestamps to std messages
 // TODO: remember timestamp rules per context service
@@ -505,4 +506,6 @@ func main() {
 // TODO: show quitting status somewhere
 // TODO: filter to only show running tabs
 // TODO: automatically send second stop after 30s and then every 5s after that
-// TODO: block sending another start/stop for 1s
+// TODO: make windows gradle/maven/java kill optional
+// TODO: add kill options as regex to config
+// TODO: add command replacement regex to config
