@@ -137,13 +137,13 @@ func (l *Log) clearOldLines() {
 func (l *Log) AddContent(addition string, endLine bool) {
 	l.contentMutex.Lock()
 	defer l.contentMutex.Unlock()
-	atLastLine := l.currentLine == (len(l.lines) - 1)
 	if l.lastLineOpen {
 		l.lines[len(l.lines)-1] += addition
 		if endLine {
 			l.lastLineOpen = false
 		}
 	} else {
+		atLastLine := l.currentLine == (len(l.lines) - 1)
 		l.lines = append(l.lines, addition)
 		if !endLine {
 			l.lastLineOpen = true
