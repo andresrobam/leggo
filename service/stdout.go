@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"slices"
 	"sync"
 
 	"github.com/andresrobam/leggo/config"
@@ -48,6 +49,7 @@ type Service struct {
 	Log                *log.Log
 	HealthCheck        string
 	HealthCheckPeriod  int
+	WaitList           []string
 }
 
 func New(key string, name string, path string, commands []Command, configuration *config.Config, healthCheck string, healthCheckPeriod int) Service {
@@ -63,18 +65,32 @@ func New(key string, name string, path string, commands []Command, configuration
 	}
 }
 
-type ContentUpdateMsg struct{} // TODO: remove this?
-
 type ServiceStoppedMsg struct {
-	service string
+	Service string
 }
 
 type ServiceStoppingMsg struct {
-	service string
+	Service string
 }
 
 type ServiceStartedMsg struct {
-	service string
+	Service string
+}
+
+type StartServiceMsg struct {
+	Service string
+}
+
+func (s *Service) DoneWaiting(service string) {
+	i := slices.Index(s.WaitList, service)
+	if i == -1 {
+		return
+	}
+	s.WaitList = slices.Delete(s.WaitList, i, i+1)
+	if len(s.WaitList) == 0 {
+		s.addSysoutLine("All dependencies for are up, starting")
+		s.StartService()
+	}
 }
 
 func (s *Service) addOutput(addition string, endLine bool, lineType LineType) {

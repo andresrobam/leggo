@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sync"
 	"time"
 
@@ -41,13 +42,38 @@ func (s *Service) transform(command string) string {
 type Command struct {
 	Command  string
 	Path     string
-	Unique   string   // TODO: implement
-	Requires []string // TODO: implement
+	Unique   string // TODO: implement
+	Requires []string
 	Kill     bool
 }
 
 func (s *Service) StartService() {
+
+	if s.State == StateRunning || s.State == StateStopping {
+		return
+	}
+
+	if s.State == StateStopped && s.ActiveCommandIndex == 0 {
+		for i := range s.Commands {
+			s.State = StateStarting
+			for _, requiredService := range s.Commands[i].Requires {
+				if !slices.Contains(s.WaitList, requiredService) {
+					s.WaitList = append(s.WaitList, requiredService)
+					s.addSysoutLine(fmt.Sprintf("Starting required service: %s", requiredService))
+					go s.Program.Send(StartServiceMsg{Service: requiredService})
+				}
+			}
+		}
+	}
+
 	c := s.Commands[s.ActiveCommandIndex]
+
+	for _, requiredService := range c.Requires {
+		if slices.Contains(s.WaitList, requiredService) {
+			s.addSysoutLine("Waiting for required services to start")
+			return
+		}
+	}
 
 	command := s.transform(c.Command)
 
@@ -130,7 +156,7 @@ func (s *Service) CheckHealth() {
 			}
 			s.addSysoutLine("Healthcheck passed")
 			s.State = StateRunning
-			go s.Program.Send(ServiceStartedMsg{service: s.Key})
+			go s.Program.Send(ServiceStartedMsg{Service: s.Key})
 			return
 		}
 		s.addSyserrLine(fmt.Sprintf("Healthcheck failed with exit code: %d", hc.ProcessState.ExitCode()))
@@ -179,8 +205,9 @@ func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service
 	if runNextCommand {
 		go s.StartService()
 	} else {
+		s.WaitList = []string{}
 		s.State = StateStopped
-		go s.Program.Send(ServiceStoppedMsg{service: s.Key})
+		go s.Program.Send(ServiceStoppedMsg{Service: s.Key})
 	}
 	s.StateMutex.Unlock()
 }
@@ -188,11 +215,12 @@ func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service
 func (s *Service) EndService() {
 	s.TermAttemptCount++
 	s.State = StateStopping
+	s.WaitList = []string{}
 	s.addSysoutLine("Closing process")
 	if err := s.end(); err != nil {
 		s.addSyserrLine(fmt.Sprintf("Error closing process: %s", err))
 	} else {
-		go s.Program.Send(ServiceStoppingMsg{service: s.Key})
+		go s.Program.Send(ServiceStoppingMsg{Service: s.Key})
 	}
 }
 

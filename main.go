@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/andresrobam/leggo/config"
 	"github.com/andresrobam/leggo/service"
@@ -173,6 +172,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case service.ServiceStartedMsg:
+		for i := range services {
+			services[i].StateMutex.Lock()
+			services[i].DoneWaiting(msg.Service)
+			services[i].StateMutex.Unlock()
+		}
+
+	case service.StartServiceMsg:
+		startService(msg.Service)
+
 	case tea.WindowSizeMsg:
 		headerHeight := lipgloss.Height(m.headerView(msg.Width))
 		footerHeight := lipgloss.Height(m.footerView(msg.Width))
@@ -195,6 +204,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
+}
+
+func startService(service string) {
+	if quitting {
+		return
+	}
+	for i := range services {
+		if services[i].Key == service {
+			services[i].StateMutex.Lock()
+			services[i].StartService()
+			services[i].StateMutex.Unlock()
+			break
+		}
+	}
 }
 
 func (m model) View() string {
@@ -497,13 +520,6 @@ func main() {
 	for i := range services {
 		services[i].Program = p
 	}
-	go func() {
-		ticker := time.NewTicker(time.Duration(configuration.RefreshMillis) * time.Millisecond)
-		defer ticker.Stop()
-		for range ticker.C {
-			p.Send(service.ContentUpdateMsg{})
-		}
-	}()
 
 	if _, err := p.Run(); err != nil {
 		fmt.Println("Error running bubbletea program: ", err)
@@ -523,7 +539,6 @@ func main() {
 // TODO: style sysout messages
 // TODO: style syserr messages
 // TODO: system to make sure some services arent started in parallel
-// TODO: requirements (one service can depend on another)
 // TODO: allow overriding success codes for commands
 // TODO: filter to only show running tabs
 // TODO: automatically send second stop after 30s and then every 5s after that
