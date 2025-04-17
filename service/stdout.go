@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
-	"slices"
 	"sync"
 
 	"github.com/andresrobam/leggo/config"
@@ -47,24 +46,22 @@ type Service struct {
 	ActiveCommandIndex int
 	Configuration      *config.Config
 	Log                *log.Log
-	HealthCheck        string
-	HealthCheckPeriod  int
+	Healthcheck        Healthcheck
 	WaitList           []string
 }
 
 var Services map[string]*Service
 var Locks map[string]*sync.Mutex
 
-func New(key string, name string, path string, commands []Command, configuration *config.Config, healthCheck string, healthCheckPeriod int) Service {
+func New(key string, name string, path string, commands []Command, configuration *config.Config, healthcheck Healthcheck) Service {
 	return Service{
-		Key:               key,
-		Name:              name,
-		Path:              path,
-		Commands:          commands,
-		Configuration:     configuration,
-		Log:               log.New(configuration),
-		HealthCheck:       healthCheck,
-		HealthCheckPeriod: healthCheckPeriod,
+		Key:           key,
+		Name:          name,
+		Path:          path,
+		Commands:      commands,
+		Configuration: configuration,
+		Log:           log.New(configuration),
+		Healthcheck:   healthcheck,
 	}
 }
 
@@ -85,18 +82,6 @@ type StartServiceMsg struct {
 }
 
 type ContentUpdateMsg struct{}
-
-func (s *Service) DoneWaiting(service string) {
-	i := slices.Index(s.WaitList, service)
-	if i == -1 {
-		return
-	}
-	s.WaitList = slices.Delete(s.WaitList, i, i+1)
-	if len(s.WaitList) == 0 {
-		s.addSysoutLine("All dependencies for are up, starting")
-		s.StartService()
-	}
-}
 
 func (s *Service) addOutput(addition string, endLine bool, lineType LineType) {
 	s.Log.AddContent(addition, endLine)

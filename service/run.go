@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,9 +48,14 @@ type Command struct {
 	Kill     bool
 }
 
+type Healthcheck struct {
+	Command string
+	Period  int
+}
+
 func (s *Service) StartService() {
 
-	if s.State == StateRunning || s.State == StateStopping {
+	if s.State == StateRunning || s.State == StateStopping || (s.State == StateStarting && s.cmd != nil) {
 		return
 	}
 
@@ -60,7 +66,9 @@ func (s *Service) StartService() {
 				if !slices.Contains(s.WaitList, requiredService) && Services[requiredService].State != StateRunning {
 					s.WaitList = append(s.WaitList, requiredService)
 					s.addSysoutLine(fmt.Sprintf("Starting required service: %s", requiredService))
-					go s.Program.Send(StartServiceMsg{Service: requiredService})
+					defer func() {
+						go s.Program.Send(StartServiceMsg{Service: requiredService})
+					}()
 				}
 			}
 		}
@@ -70,7 +78,7 @@ func (s *Service) StartService() {
 
 	for _, requiredService := range c.Requires {
 		if slices.Contains(s.WaitList, requiredService) {
-			s.addSysoutLine("Waiting for required services to start")
+			s.addSysoutLine(fmt.Sprintf("Waiting for required services to start: %s", strings.Join(s.WaitList, ", ")))
 			return
 		}
 	}
@@ -125,11 +133,11 @@ func (s *Service) StartService() {
 	go writeFromPipe(&errPipe, true, s, wg)
 
 	if s.ActiveCommandIndex == len(s.Commands)-1 {
-		if s.HealthCheck != "" {
+		if s.Healthcheck.Command != "" {
 			go s.CheckHealth()
 		} else {
 			s.State = StateRunning
-			go s.Program.Send(ServiceStartedMsg{})
+			go s.Program.Send(ServiceStartedMsg{Service: s.Key})
 		}
 	}
 	go handleRunningProcess(wg, &outPipe, s, &errPipe)
@@ -141,10 +149,10 @@ func (s *Service) CheckHealth() {
 		return
 	}
 
-	hc := exec.Command(s.Configuration.CommandExecutor, s.Configuration.CommandArgument, s.HealthCheck)
+	hc := exec.Command(s.Configuration.CommandExecutor, s.Configuration.CommandArgument, s.Healthcheck.Command)
 	hc.SysProcAttr = sys.GetSysProcAttr()
 	hc.Dir = s.Path
-	s.addSysoutLine(fmt.Sprintf("Running healthcheck \"%s\"", s.HealthCheck))
+	s.addSysoutLine(fmt.Sprintf("Running healthcheck \"%s\"", s.Healthcheck.Command))
 	if err := hc.Run(); err != nil {
 		s.addSyserrLine(fmt.Sprintf("Error running healthcheck: %s", err))
 	} else {
@@ -161,13 +169,29 @@ func (s *Service) CheckHealth() {
 		}
 		s.addSyserrLine(fmt.Sprintf("Healthcheck failed with exit code: %d", hc.ProcessState.ExitCode()))
 	}
-	healthCheckPeriod := s.HealthCheckPeriod
+	healthCheckPeriod := s.Healthcheck.Period
 	if healthCheckPeriod == 0 {
 		healthCheckPeriod = 1
 	}
 	<-time.After(time.Duration(healthCheckPeriod) * time.Second)
 	s.CheckHealth()
 
+}
+
+func (s *Service) DoneWaiting(service string) {
+	s.StateMutex.Lock()
+	defer s.StateMutex.Unlock()
+	i := slices.Index(s.WaitList, service)
+	if i == -1 {
+		return
+	}
+	s.WaitList = slices.Delete(s.WaitList, i, i+1)
+	if len(s.WaitList) == 0 {
+		s.addSysoutLine("All dependencies for are up, starting")
+		if s.State == StateStarting {
+			s.StartService()
+		}
+	}
 }
 
 func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service, errPipe *io.ReadCloser) {

@@ -171,13 +171,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !anyRunning {
 				return m, tea.Quit
 			}
+		} else {
+			for i := range services {
+				if slices.Contains(services[i].WaitList, msg.Service) {
+					startService(msg.Service)
+					break
+				}
+			}
 		}
 
 	case service.ServiceStartedMsg:
 		for i := range services {
-			services[i].StateMutex.Lock()
 			services[i].DoneWaiting(msg.Service)
-			services[i].StateMutex.Unlock()
 		}
 
 	case service.StartServiceMsg:
@@ -383,11 +388,10 @@ var activeMutex sync.RWMutex
 type contextDefinition struct {
 	Name     string `yaml:"name"`
 	Services map[string]struct {
-		Name              string
-		Path              string
-		Commands          []service.Command
-		Healthcheck       string
-		HealthcheckPeriod int `yaml:"healthcheckPeriod"`
+		Name        string
+		Path        string
+		Commands    []service.Command
+		Healthcheck service.Healthcheck
 	} `yaml:"services"`
 }
 
@@ -500,7 +504,7 @@ func main() {
 			servicePath, _ = filepath.Abs(filepath.Join(contextDir, servicePath))
 		}
 
-		newService := service.New(serviceKey, name, servicePath, s.Commands, &configuration, s.Healthcheck, s.HealthcheckPeriod)
+		newService := service.New(serviceKey, name, servicePath, s.Commands, &configuration, s.Healthcheck)
 		services[i] = &newService
 		service.Services[serviceKey] = &newService
 		for j := range newService.Commands {
@@ -561,3 +565,4 @@ func main() {
 // TODO: make windows gradle/maven/java kill optional
 // TODO: add kill options as regex to config
 // TODO: add command replacement regex to config
+// TODO: scroll inside wrapped lines
