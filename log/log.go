@@ -36,6 +36,14 @@ func (l *Log) GetContentSize() int {
 	return l.size
 }
 
+func (l *Log) GetCurrentLine() int {
+	return l.currentLine
+}
+
+func (l *Log) GetLineCount() int {
+	return len(l.lines)
+}
+
 func (l *Log) View() (string, bool) {
 	if !l.contentUpdated.Swap(false) {
 		return l.view, false
@@ -64,12 +72,16 @@ func (l *Log) clampCurrentLine() {
 }
 
 func (l *Log) Scroll(amount int) {
+	l.contentMutex.Lock()
+	defer l.contentMutex.Unlock()
 	l.currentLine += amount
 	l.clampCurrentLine()
 	l.contentUpdated.Store(true)
 }
 
 func (l *Log) GotoBottom() {
+	l.contentMutex.Lock()
+	defer l.contentMutex.Unlock()
 	if len(l.lines) == 0 {
 		return
 	}

@@ -50,6 +50,12 @@ type Service struct {
 	WaitList           []string
 }
 
+func (s *Service) GetState() State {
+	s.StateMutex.RLock()
+	defer s.StateMutex.RUnlock()
+	return s.State
+}
+
 var Services map[string]*Service
 var Locks map[string]*sync.Mutex
 

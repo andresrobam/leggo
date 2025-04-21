@@ -322,6 +322,7 @@ var statusBarBackgroundColors = []color.Color{
 	lipgloss.Color("#123ce3"),
 	lipgloss.Color("#120ce3"),
 	lipgloss.Color("#0000c3"),
+	lipgloss.Color("#0000a3"),
 }
 
 func (m model) footerView(width int) string {
@@ -330,6 +331,7 @@ func (m model) footerView(width int) string {
 		context.Name,
 		fmt.Sprintf("%d/%d running", runningServiceCount(), len(services)),
 		fmt.Sprintf("Log: %s", formatDataSize(activeService.Log.GetContentSize())),
+		//fmt.Sprintf("Scroll: %d/%d", activeService.Log.GetCurrentLine(), activeService.Log.GetLineCount()),
 	}
 
 	if activeService.Pid != 0 {
