@@ -376,7 +376,6 @@ func (m model) footerView(width int) string {
 		context.Name,
 		fmt.Sprintf("%d/%d running", runningServiceCount(), len(services)),
 		fmt.Sprintf("Log: %s", formatDataSize(activeService.Log.GetContentSize())),
-		//fmt.Sprintf("Scroll: %d/%d", activeService.Log.GetCurrentLine(), activeService.Log.GetLineCount()),
 	}
 
 	if activeService.Pid != 0 {
@@ -613,4 +612,4 @@ func main() {
 // TODO: make windows gradle/maven/java kill optional
 // TODO: add kill options as regex to config
 // TODO: add command replacement regex to config
-// TODO: scroll inside wrapped lines
+// TODO: show if tabs are filtered somewhere

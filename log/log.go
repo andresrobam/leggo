@@ -1,6 +1,7 @@
 package log
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -11,16 +12,18 @@ import (
 )
 
 type Log struct {
-	width          int
-	height         int
-	lines          []string
-	lastLineOpen   bool
-	currentLine    int
-	configuration  *config.Config
-	contentMutex   sync.RWMutex
-	contentUpdated atomic.Bool
-	view           string
-	size           int
+	width                       int
+	height                      int
+	lines                       []string
+	lastLineOpen                bool
+	currentLine                 int
+	currentLineOffset           int
+	currentLineOffsetPercentage float32
+	configuration               *config.Config
+	contentMutex                sync.RWMutex
+	contentUpdated              atomic.Bool
+	view                        string
+	size                        int
 }
 
 func New(configuration *config.Config) *Log {
@@ -60,23 +63,99 @@ func (l *Log) View() (string, bool) {
 }
 
 func (l *Log) clampCurrentLine() {
-	if l.currentLine < l.height-1 {
-		if l.height >= len(l.lines) {
-			l.currentLine = len(l.lines) - 1
-		} else {
-			l.currentLine = l.height - 1
+	if len(l.lines) == 0 {
+		l.currentLine = 0
+		l.currentLineOffset = 0
+		l.currentLineOffsetPercentage = 0
+		return
+	}
+	if l.currentLine >= l.height-1 {
+		return
+	}
+	scrollAmount := l.height - len(l.getVisibleLines())
+	for range scrollAmount {
+		if l.scroll(false) {
+			return
 		}
-	} else if l.currentLine >= len(l.lines)-1 {
-		l.currentLine = len(l.lines) - 1
 	}
 }
 
 func (l *Log) Scroll(amount int) {
+	if amount == 0 {
+		return
+	}
 	l.contentMutex.Lock()
 	defer l.contentMutex.Unlock()
-	l.currentLine += amount
+
+	if len(l.lines) == 0 {
+		return
+	}
+
+	up := amount < 0
+	if up {
+		amount *= -1
+	}
+	for range amount {
+		if l.scroll(up) {
+			break
+		}
+	}
 	l.clampCurrentLine()
 	l.contentUpdated.Store(true)
+}
+
+func (l *Log) ScrollDebug() string {
+	return fmt.Sprintf("l: %d, o: %d, h: %d, p: %.2f", l.currentLine, l.currentLineOffset, l.getLineHeight(l.currentLine), l.currentLineOffsetPercentage)
+}
+
+func (l *Log) getLineHeight(i int) int {
+	if len(l.lines) == 0 {
+		return 0
+	}
+	return len(strings.Split(ansi.Hardwrap(l.lines[i], l.width, true), "\n"))
+}
+
+func (l *Log) recalculateCurrentLineOffsetPercentage() {
+	l.recalculateCurrentLineOffsetPercentageWithHeight(l.getLineHeight(l.currentLine))
+}
+func (l *Log) recalculateCurrentLineOffsetPercentageWithHeight(lineHeight int) {
+	if lineHeight < 2 {
+		l.currentLineOffsetPercentage = 0
+		return
+	}
+	l.currentLineOffsetPercentage = float32(l.currentLineOffset) / (float32(lineHeight) - 1)
+}
+
+func (l *Log) scroll(up bool) bool {
+	if up { // scrolling up
+		currentLineHeight := l.getLineHeight(l.currentLine)
+		if -l.currentLineOffset+1 >= currentLineHeight { // at top of current line
+			if l.currentLine == 0 { // at top of log
+				return true
+			}
+			l.currentLine--
+			l.currentLineOffset = 0
+			l.currentLineOffsetPercentage = 0
+		} else { // in the middle of current line
+			l.currentLineOffset--
+			l.recalculateCurrentLineOffsetPercentageWithHeight(currentLineHeight)
+		}
+
+	} else { // scrolling down
+		if l.currentLineOffset >= 0 { // at bottom of current line
+			if l.currentLine == len(l.lines)-1 { // at bottom of log
+				return true
+			}
+			l.currentLine++
+			currentLineHeight := l.getLineHeight(l.currentLine)
+			l.currentLineOffset = -currentLineHeight + 1
+			l.recalculateCurrentLineOffsetPercentageWithHeight(currentLineHeight)
+		} else { // in the middle of current line
+			l.currentLineOffset++
+			l.recalculateCurrentLineOffsetPercentage()
+		}
+	}
+	return false
 }
 
 func (l *Log) GotoBottom() {
@@ -86,13 +165,31 @@ func (l *Log) GotoBottom() {
 		return
 	}
 	l.currentLine = len(l.lines) - 1
+	l.currentLineOffset = 0
+	l.currentLineOffsetPercentage = 0
 	l.contentUpdated.Store(true)
 }
 
+func (l *Log) AtBottom() bool {
+	return len(l.lines) == 0 || (l.currentLine == len(l.lines)-1 && l.currentLineOffset == 0)
+}
+
 func (l *Log) SetSize(width int, height int) {
+	l.contentMutex.Lock()
+	defer l.clampCurrentLine()
+	defer l.contentUpdated.Store(true)
+	defer l.contentMutex.Unlock()
 	l.width = width
 	l.height = height
-	l.contentUpdated.Store(true)
+	if len(l.lines) == 0 {
+		return
+	}
+	currentLineHeight := l.getLineHeight(l.currentLine)
+	if currentLineHeight == 0 {
+		return
+	}
+	l.currentLineOffset = int(l.currentLineOffsetPercentage * float32(currentLineHeight-1))
+	l.recalculateCurrentLineOffsetPercentageWithHeight(currentLineHeight)
 }
 
 func (l *Log) getVisibleLines() []string {
@@ -106,7 +203,11 @@ func (l *Log) getVisibleLines() []string {
 outer:
 	for i := l.currentLine; i >= 0; i-- {
 		wrappedLines := strings.Split(ansi.Hardwrap(l.lines[i], l.width, true), "\n")
-		for j := len(wrappedLines) - 1; j >= 0; j-- {
+		startingLine := len(wrappedLines) - 1
+		if i == l.currentLine {
+			startingLine += l.currentLineOffset
+		}
+		for j := startingLine; j >= 0; j-- {
 			visibleLines[screenLine] = wrappedLines[j]
 			screenLine--
 			if screenLine < 0 {
@@ -155,7 +256,7 @@ func (l *Log) AddContent(addition string, endLine bool) {
 			l.lastLineOpen = false
 		}
 	} else {
-		atLastLine := l.currentLine == (len(l.lines) - 1)
+		atLastLine := l.AtBottom()
 		l.lines = append(l.lines, addition)
 		if !endLine {
 			l.lastLineOpen = true
