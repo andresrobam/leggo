@@ -140,19 +140,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.IsRepeat {
 			break
 		} else if k := msg.String(); k == "ctrl+c" || k == "q" || k == "esc" {
-			quitting = true
-			var anyRunning bool
-			for i := range services {
-				services[i].StateMutex.Lock()
-				if services[i].State != service.StateStopped {
-					anyRunning = true
-					services[i].EndService()
-				}
-				services[i].StateMutex.Unlock()
-			}
-			if !anyRunning {
+			if stopAllServices(true) {
 				return m, tea.Quit
 			}
+		} else if k == "s" {
+			stopAllServices(false)
 		} else if k == "enter" || k == "space" {
 			activeMutex.RLock()
 			activeService.StateMutex.Lock()
@@ -245,6 +237,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
+}
+
+func stopAllServices(quit bool) bool {
+	if quitting {
+		return false
+	}
+	quitting = quit
+	var anyRunning bool
+	for i := range services {
+		services[i].StateMutex.Lock()
+		if services[i].State != service.StateStopped {
+			anyRunning = true
+			services[i].EndService()
+		}
+		services[i].StateMutex.Unlock()
+	}
+	return quitting && !anyRunning
 }
 
 func startService(serviceKey string) {
@@ -605,4 +614,3 @@ func main() {
 // TODO: add kill options as regex to config
 // TODO: add command replacement regex to config
 // TODO: scroll inside wrapped lines
-// TODO: key to shut down all services without quitting
