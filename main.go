@@ -18,6 +18,13 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 )
 
+type Mode int
+
+const (
+	ModeNormal Mode = iota
+	ModeSearch
+)
+
 type model struct {
 	ready  bool
 	width  int
@@ -44,24 +51,51 @@ func saveContextSettings() {
 	}
 }
 
-func changeActive(increment int) {
+func changeActive(right bool) {
 	if len(services) < 2 {
 		return
 	}
 	activeMutex.Lock()
-	activeIndex += increment
-	if activeIndex < 0 {
-		activeIndex = len(services) - 1
-	} else if activeIndex >= len(services) {
-		activeIndex = 0
+	defer activeMutex.Unlock()
+
+	visibleServiceIndexes := visibleServiceIndexes()
+	if len(visibleServiceIndexes) < 2 {
+		return
 	}
+	activeIndexInVisibleSlice := slices.Index(visibleServiceIndexes, activeIndex)
+	if right {
+		activeIndexInVisibleSlice++
+		if activeIndexInVisibleSlice >= len(visibleServiceIndexes) {
+			activeIndexInVisibleSlice = 0
+		}
+	} else {
+		activeIndexInVisibleSlice--
+		if activeIndexInVisibleSlice < 0 {
+			activeIndexInVisibleSlice = len(visibleServiceIndexes) - 1
+		}
+	}
+	activeIndex = visibleServiceIndexes[activeIndexInVisibleSlice]
 	activeService = services[activeIndex]
+
 	saveContextSettings()
-	activeMutex.Unlock()
+}
+
+func visibleServiceIndexes() []int {
+	visibleServiceIndexes := make([]int, 0, len(services))
+
+	for i := range services {
+		services[i].StateMutex.RLock()
+		if !onlyActive || services[i].State != service.StateStopped || i == activeIndex {
+			visibleServiceIndexes = append(visibleServiceIndexes, i)
+		}
+		services[i].StateMutex.RUnlock()
+	}
+
+	return visibleServiceIndexes
 }
 
 func swap(increment int) {
-	if len(services) < 2 {
+	if onlyActive || len(services) < 2 {
 		return
 	}
 	activeMutex.Lock()
@@ -137,13 +171,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			activeService.StateMutex.Unlock()
 			activeMutex.RUnlock()
 		} else if k == "left" || k == "h" {
-			changeActive(-1)
+			changeActive(false)
 		} else if k == "right" || k == "l" {
-			changeActive(1)
+			changeActive(true)
 		} else if k == "shift+left" || k == "shift+h" {
 			swap(-1)
 		} else if k == "shift+right" || k == "shift+l" {
 			swap(1)
+		} else if k == "a" {
+			onlyActive = !onlyActive
 		} else if k == "up" || k == "k" {
 			activeMutex.RLock()
 			activeService.Log.Scroll(-1)
@@ -189,12 +225,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		startService(msg.Service)
 
 	case tea.WindowSizeMsg:
+		activeMutex.RLock()
 		headerHeight := lipgloss.Height(m.headerView(msg.Width))
 		footerHeight := lipgloss.Height(m.footerView(msg.Width))
 		m.height = msg.Height
 		m.width = msg.Width
-
-		activeMutex.RLock()
 
 		for i := range services {
 			services[i].Log.SetSize(msg.Width, msg.Height-headerHeight-footerHeight)
@@ -254,7 +289,8 @@ var stoppingStyle = lipgloss.NewStyle().
 func (m model) headerView(width int) string {
 
 	var title string
-	for i := range services {
+
+	for _, i := range visibleServiceIndexes() {
 		var tabStyle *lipgloss.Style
 		var stateStyle *lipgloss.Style
 		services[i].StateMutex.RLock()
@@ -384,6 +420,8 @@ var activeService *service.Service
 var activeIndex = 0
 var quitting bool
 var configuration config.Config
+var onlyActive bool
+var mode = ModeNormal
 
 var activeMutex sync.RWMutex
 
@@ -562,9 +600,9 @@ func main() {
 // TODO: style syserr messages
 // TODO: system to make sure some services arent started in parallel
 // TODO: allow overriding success codes for commands
-// TODO: filter to only show running tabs
 // TODO: automatically send second stop after 30s and then every 5s after that
 // TODO: make windows gradle/maven/java kill optional
 // TODO: add kill options as regex to config
 // TODO: add command replacement regex to config
 // TODO: scroll inside wrapped lines
+// TODO: key to shut down all services without quitting
