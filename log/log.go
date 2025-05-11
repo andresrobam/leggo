@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 
 	"github.com/andresrobam/leggo/config"
+	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -24,6 +25,32 @@ type Log struct {
 	contentUpdated              atomic.Bool
 	view                        string
 	size                        int
+	mode                        Mode
+}
+
+type Mode int
+
+const (
+	ModeNormal = iota
+	ModeSearchInput
+	ModeSearchNavigation
+	ModeFilterInput
+	ModeFiltered
+)
+
+func (l *Log) HandleKey(msg tea.KeyPressMsg) bool {
+	k := msg.String()
+	if k == "ctrl+c" {
+		return false
+	}
+	switch l.mode {
+	case ModeNormal:
+	case ModeSearchInput:
+	case ModeSearchNavigation:
+	case ModeFilterInput:
+	case ModeFiltered:
+	}
+	return false
 }
 
 func New(configuration *config.Config) *Log {
@@ -158,6 +185,20 @@ func (l *Log) scroll(up bool) bool {
 	return false
 }
 
+func (l *Log) GotoTop() {
+	l.contentMutex.Lock()
+	defer l.contentMutex.Unlock()
+	if len(l.lines) == 0 {
+		return
+	}
+	l.currentLine = 0
+	lineHeight := l.getLineHeight(l.currentLine)
+	l.currentLineOffset = -lineHeight + 1
+	l.recalculateCurrentLineOffsetPercentageWithHeight(lineHeight)
+	l.clampCurrentLine()
+	l.contentUpdated.Store(true)
+}
+
 func (l *Log) GotoBottom() {
 	l.contentMutex.Lock()
 	defer l.contentMutex.Unlock()
@@ -261,7 +302,7 @@ func (l *Log) AddContent(addition string, endLine bool) {
 		if !endLine {
 			l.lastLineOpen = true
 		}
-		if atLastLine {
+		if atLastLine && len(l.lines) != 1 {
 			l.currentLine++
 		}
 	}

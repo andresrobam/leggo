@@ -12,17 +12,11 @@ import (
 	"time"
 
 	"github.com/andresrobam/leggo/config"
+	"github.com/andresrobam/leggo/log"
 	"github.com/andresrobam/leggo/service"
 	"github.com/andresrobam/leggo/yaml"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
-)
-
-type Mode int
-
-const (
-	ModeNormal Mode = iota
-	ModeSearch
 )
 
 type model struct {
@@ -137,51 +131,75 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
-		if msg.IsRepeat {
+		k := msg.String()
+		var activeLog *log.Log
+		activeMutex.RLock()
+		if showHelp {
+			activeLog = help
+		} else {
+			activeLog = activeService.Log
+		}
+		keyConsumed := activeLog.HandleKey(msg)
+		activeMutex.RUnlock()
+		if keyConsumed {
 			break
-		} else if k := msg.String(); k == "ctrl+c" || k == "q" || k == "esc" {
+		}
+
+		if k == "ctrl+c" || k == "q" || k == "esc" {
+			if showHelp && k != "ctrl+c" {
+				showHelp = false
+				break
+			}
+			showHelp = false
 			if stopAllServices(true) {
 				return m, tea.Quit
 			}
-		} else if k == "s" {
-			stopAllServices(false)
-		} else if k == "enter" || k == "space" {
-			activeMutex.RLock()
-			activeService.StateMutex.Lock()
-			switch activeService.State {
-			case service.StateStopped:
-				if !quitting {
-					activeService.StartService()
-				}
-			case service.StateStarting:
-				activeService.EndService()
-			case service.StateRunning:
-				activeService.EndService()
-			case service.StateStopping:
-				activeService.EndService()
-			}
-			activeService.StateMutex.Unlock()
-			activeMutex.RUnlock()
-		} else if k == "left" || k == "h" {
-			changeActive(false)
-		} else if k == "right" || k == "l" {
-			changeActive(true)
-		} else if k == "shift+left" || k == "shift+h" {
-			swap(-1)
-		} else if k == "shift+right" || k == "shift+l" {
-			swap(1)
-		} else if k == "a" {
-			onlyActive = !onlyActive
+			break
 		} else if k == "up" || k == "k" {
-			activeMutex.RLock()
-			activeService.Log.Scroll(-1)
-			activeMutex.RUnlock()
+			activeLog.Scroll(-1)
 		} else if k == "down" || k == "j" {
-			activeMutex.RLock()
-			activeService.Log.Scroll(1)
-			activeMutex.RUnlock()
-		} else if k == "b" || k == "f" {
-			activeService.Log.GotoBottom()
+			activeLog.Scroll(1)
+		} else if k == "b" {
+			activeLog.GotoBottom()
+		} else if k == "t" {
+			activeLog.GotoTop()
+		} else if showHelp {
+			if msg.Key().Code == '?' || k == "enter" || k == "space" {
+				showHelp = false
+			}
+		} else {
+			if k == "s" {
+				stopAllServices(false)
+			} else if k == "enter" || k == "space" {
+				activeMutex.RLock()
+				activeService.StateMutex.Lock()
+				switch activeService.State {
+				case service.StateStopped:
+					if !quitting {
+						activeService.StartService()
+					}
+				case service.StateStarting:
+					activeService.EndService()
+				case service.StateRunning:
+					activeService.EndService()
+				case service.StateStopping:
+					activeService.EndService()
+				}
+				activeService.StateMutex.Unlock()
+				activeMutex.RUnlock()
+			} else if k == "left" || k == "h" {
+				changeActive(false)
+			} else if k == "right" || k == "l" {
+				changeActive(true)
+			} else if k == "shift+left" || k == "shift+h" {
+				swap(-1)
+			} else if k == "shift+right" || k == "shift+l" {
+				swap(1)
+			} else if k == "a" {
+				onlyActive = !onlyActive
+			} else if msg.Key().Code == '?' {
+				showHelp = true
+			}
 		}
 
 	case service.ServiceStoppedMsg:
@@ -223,6 +241,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.width = msg.Width
 
+		help.SetSize(msg.Width, msg.Height-headerHeight-footerHeight)
 		for i := range services {
 			services[i].Log.SetSize(msg.Width, msg.Height-headerHeight-footerHeight)
 		}
@@ -272,7 +291,14 @@ func (m model) View() string {
 	}
 	activeMutex.RLock()
 	defer activeMutex.RUnlock()
-	logView, _ := activeService.Log.View()
+	var logView string
+
+	if showHelp {
+		logView, _ = help.View()
+	} else {
+		logView, _ = activeService.Log.View()
+	}
+
 	return fmt.Sprintf("%s\n%s\n%s", m.headerView(m.width), logView, m.footerView(m.width))
 }
 
@@ -299,29 +325,33 @@ func (m model) headerView(width int) string {
 
 	var title string
 
-	for _, i := range visibleServiceIndexes() {
-		var tabStyle *lipgloss.Style
-		var stateStyle *lipgloss.Style
-		services[i].StateMutex.RLock()
-		switch services[i].State {
-		case service.StateRunning:
-			stateStyle = &runningStyle
-		case service.StateStopping:
-			stateStyle = &stoppingStyle
-		case service.StateStarting:
-			stateStyle = &stoppingStyle
-		default:
-			stateStyle = &stoppedStyle
+	if showHelp {
+		title = activeCmdStyle.Render(" Help ")
+	} else {
+		for _, i := range visibleServiceIndexes() {
+			var tabStyle *lipgloss.Style
+			var stateStyle *lipgloss.Style
+			services[i].StateMutex.RLock()
+			switch services[i].State {
+			case service.StateRunning:
+				stateStyle = &runningStyle
+			case service.StateStopping:
+				stateStyle = &stoppingStyle
+			case service.StateStarting:
+				stateStyle = &stoppingStyle
+			default:
+				stateStyle = &stoppedStyle
+			}
+			services[i].StateMutex.RUnlock()
+			if i == activeIndex {
+				tabStyle = &activeCmdStyle
+			} else if i%2 == 0 {
+				tabStyle = &cmdStyle
+			} else {
+				tabStyle = &altCmdStyle
+			}
+			title += tabStyle.Render(" ") + stateStyle.Inherit(*tabStyle).Render("●") + tabStyle.Render(" "+services[i].Name+" ")
 		}
-		services[i].StateMutex.RUnlock()
-		if i == activeIndex {
-			tabStyle = &activeCmdStyle
-		} else if i%2 == 0 {
-			tabStyle = &cmdStyle
-		} else {
-			tabStyle = &altCmdStyle
-		}
-		title += tabStyle.Render(" ") + stateStyle.Inherit(*tabStyle).Render("●") + tabStyle.Render(" "+services[i].Name+" ")
 	}
 	return lipgloss.NewStyle().Width(width).Render(title)
 }
@@ -371,6 +401,10 @@ var statusBarBackgroundColors = []color.Color{
 }
 
 func (m model) footerView(width int) string {
+
+	if showHelp {
+		return ""
+	}
 
 	statusBarItems := []string{
 		context.Name,
@@ -429,7 +463,9 @@ var activeIndex = 0
 var quitting bool
 var configuration config.Config
 var onlyActive bool
-var mode = ModeNormal
+var showHelp bool
+var filterLogs bool
+var help *log.Log
 
 var activeMutex sync.RWMutex
 
@@ -491,7 +527,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	var configuration config.Config
 	config.ApplyDefaults(&configuration)
 
 	if err := config.ReadConfig(&configuration); err != nil {
@@ -569,6 +604,33 @@ func main() {
 		}
 	}
 	activeService = services[activeIndex]
+	help = log.New(&configuration)
+
+	helpContent := []string{
+		"",
+		"Keys:",
+		"",
+		"[?] to toggle help screen",
+		"[?] or [enter] or [space] or [q] or [esc] to exit help screen",
+		"",
+		"[ctrl+c] or [q] or [esc] to exit application",
+		"",
+		"[up] or [k] or [mouse_scrollup] to scroll log up",
+		"[down] or [j] or [mouse_scrolldown] to scroll log down",
+		"[b] to go to the bottom of the log",
+		"[t] to go to the top of the log",
+		"",
+		"[left] or [right] to move between services",
+		"[shift+left] or [shift+right] to swap places between services",
+		"",
+		"[s] to stop all running services",
+		"[a] to toggle between showing only running services",
+	}
+
+	for _, line := range helpContent {
+		help.AddContent(line, true)
+	}
+	help.GotoTop()
 
 	if runtime.GOOS == "windows" {
 		os.Setenv("TEA_STANDARD_RENDERER", "true")
@@ -577,7 +639,6 @@ func main() {
 	p = tea.NewProgram(
 		model{},
 		tea.WithAltScreen(),
-		tea.WithKeyboardEnhancements(tea.WithKeyReleases),
 	)
 	for i := range services {
 		services[i].Program = p
@@ -597,10 +658,10 @@ func main() {
 
 // TODO: more splitting of functions and modules and files and shit
 // TODO: ability to search logs (case sensitive, case insensitive, regex)
+// TODO: ability to filter logs
 // TODO: pretty header
 // TODO: handle too many elements on footer for viewport width
-// TODO: more keyboard controls (page up, page down, half page up, half page down)
-// TODO: show keyboard commands somewhere
+// TODO: more keyboard controls (page up, page down)
 // TODO: possibility to add timestamps to system messages
 // TODO: possibility to add timestamps to std messages
 // TODO: remember timestamp rules per context service

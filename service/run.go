@@ -154,6 +154,9 @@ func (s *Service) CheckHealth() {
 	hc.Dir = s.Path
 	s.addSysoutLine(fmt.Sprintf("Running healthcheck \"%s\"", s.Healthcheck.Command))
 	if err := hc.Run(); err != nil {
+		if s.State != StateStarting {
+			return
+		}
 		s.addSyserrLine(fmt.Sprintf("Error running healthcheck: %s", err))
 	} else {
 		if hc.ProcessState.ExitCode() == 0 {
