@@ -38,6 +38,10 @@ const (
 	ModeFiltered
 )
 
+func (l *Log) GetHeight() int {
+	return l.height
+}
+
 func (l *Log) HandleKey(msg tea.KeyPressMsg) bool {
 	k := msg.String()
 	if k == "ctrl+c" {

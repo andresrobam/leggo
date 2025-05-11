@@ -131,6 +131,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
+		if msg.IsRepeat {
+			break
+		}
 		k := msg.String()
 		var activeLog *log.Log
 		activeMutex.RLock()
@@ -159,6 +162,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			activeLog.Scroll(-1)
 		} else if k == "down" || k == "j" {
 			activeLog.Scroll(1)
+		} else if k == "pgup" {
+			activeLog.Scroll(-activeLog.GetHeight())
+		} else if k == "pgdown" {
+			activeLog.Scroll(activeLog.GetHeight())
 		} else if k == "b" {
 			activeLog.GotoBottom()
 		} else if k == "t" {
@@ -617,6 +624,7 @@ func main() {
 		"",
 		"[up] or [k] or [mouse_scrollup] to scroll log up",
 		"[down] or [j] or [mouse_scrolldown] to scroll log down",
+		"[page up] or [page down] to scroll up or down by screen height",
 		"[b] to go to the bottom of the log",
 		"[t] to go to the top of the log",
 		"",
@@ -661,7 +669,6 @@ func main() {
 // TODO: ability to filter logs
 // TODO: pretty header
 // TODO: handle too many elements on footer for viewport width
-// TODO: more keyboard controls (page up, page down)
 // TODO: possibility to add timestamps to system messages
 // TODO: possibility to add timestamps to std messages
 // TODO: remember timestamp rules per context service
