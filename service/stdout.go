@@ -48,6 +48,7 @@ type Service struct {
 	Log                *log.Log
 	Healthcheck        Healthcheck
 	WaitList           []string
+	touched            bool
 }
 
 func (s *Service) GetState() State {

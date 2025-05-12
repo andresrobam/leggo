@@ -189,6 +189,17 @@ func (l *Log) scroll(up bool) bool {
 	return false
 }
 
+func (l *Log) Clear() {
+	l.contentMutex.Lock()
+	defer l.contentMutex.Unlock()
+	l.lastLineOpen = false
+	l.lines = make([]string, 0, 50)
+	l.currentLine = 0
+	l.currentLineOffset = 0
+	l.currentLineOffsetPercentage = 0
+	l.contentUpdated.Store(true)
+}
+
 func (l *Log) GotoTop() {
 	l.contentMutex.Lock()
 	defer l.contentMutex.Unlock()

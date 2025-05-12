@@ -55,6 +55,11 @@ type Healthcheck struct {
 
 func (s *Service) StartService() {
 
+	if !s.touched {
+		s.Log.Clear()
+		s.touched = true
+	}
+
 	if s.State == StateRunning || s.State == StateStopping || (s.State == StateStarting && s.cmd != nil) {
 		return
 	}

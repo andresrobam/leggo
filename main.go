@@ -639,6 +639,11 @@ func main() {
 		help.AddContent(line, true)
 	}
 	help.GotoTop()
+	for i := range services {
+		services[i].Log.AddContent("", true)
+		services[i].Log.AddContent("Press [enter] or [space] to start.", true)
+		services[i].Log.AddContent("Press [?] to see all key bindings.", true)
+	}
 
 	if runtime.GOOS == "windows" {
 		os.Setenv("TEA_STANDARD_RENDERER", "true")
