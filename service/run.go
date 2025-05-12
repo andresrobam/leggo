@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/andresrobam/leggo/lock"
 	"github.com/andresrobam/leggo/sys"
 )
 
@@ -43,7 +44,7 @@ func (s *Service) transform(command string) string {
 type Command struct {
 	Command  string
 	Path     string
-	Lock     string
+	Locks    []string
 	Requires []string
 	Kill     bool
 }
@@ -88,6 +89,17 @@ func (s *Service) StartService() {
 		}
 	}
 
+	lock.LockMutex.Lock()
+	defer lock.LockMutex.Unlock()
+
+	if len(c.Locks) != 0 {
+		s.State = StateStarting
+		if overlap := lock.Overlap(c.Locks); len(overlap) != 0 {
+			s.addSysoutLine(fmt.Sprintf("Waiting for locks to unlock: %s", strings.Join(overlap, ", ")))
+			return
+		}
+	}
+
 	command := s.transform(c.Command)
 
 	s.cmd = exec.Command(s.Configuration.CommandExecutor, s.Configuration.CommandArgument, command)
@@ -101,6 +113,8 @@ func (s *Service) StartService() {
 			s.cmd.Dir, pathErr = filepath.Abs(filepath.Join(s.Path, c.Path))
 			if pathErr != nil {
 				s.addSyserrLine(fmt.Sprintf("Error: getting absolute path %s", pathErr))
+				s.ActiveCommandIndex = 0
+				s.State = StateStopped
 				return
 			}
 		}
@@ -112,6 +126,8 @@ func (s *Service) StartService() {
 	outPipe, err := s.cmd.StdoutPipe()
 	if err != nil {
 		s.addSyserrLine(fmt.Sprintf("Error: opening stdout pipe %s", err))
+		s.ActiveCommandIndex = 0
+		s.State = StateStopped
 		return
 	}
 	s.outPipe = &outPipe
@@ -119,6 +135,8 @@ func (s *Service) StartService() {
 	errPipe, err := s.cmd.StderrPipe()
 	if err != nil {
 		s.addSyserrLine(fmt.Sprintf("Error: opening stderr pipe %s", err))
+		s.ActiveCommandIndex = 0
+		s.State = StateStopped
 		return
 	}
 	s.errPipe = &errPipe
@@ -126,10 +144,13 @@ func (s *Service) StartService() {
 	s.addSysoutLine(fmt.Sprintf("Running command \"%s\"%s", command, pathMessage))
 	if err := s.cmd.Start(); err != nil {
 		s.addSyserrLine(fmt.Sprintf("Error running command: %s", err))
+		s.ActiveCommandIndex = 0
+		s.State = StateStopped
 		return
 	}
 	s.Pid = s.cmd.Process.Pid
 	s.State = StateStarting
+	lock.Lock(c.Locks)
 	s.addSysoutLine(fmt.Sprintf("Process started with PID: %d", s.Pid))
 
 	wg := new(sync.WaitGroup)
@@ -202,6 +223,20 @@ func (s *Service) DoneWaiting(service string) {
 	}
 }
 
+func (s *Service) HandleUnlock(locks []string) {
+	s.StateMutex.Lock()
+	defer s.StateMutex.Unlock()
+	if s.State != StateStarting {
+		return
+	}
+	for _, lock := range locks {
+		if slices.Contains(s.Commands[s.ActiveCommandIndex].Locks, lock) {
+			s.StartService()
+			return
+		}
+	}
+}
+
 func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service, errPipe *io.ReadCloser) {
 
 	wg.Wait()
@@ -221,6 +256,8 @@ func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service
 	message := fmt.Sprintf("Process finished with exit code: %d", exitCode)
 	s.addSysoutLine(message)
 
+	activeCommandIndex := s.ActiveCommandIndex
+
 	var runNextCommand bool
 	if !wasStopping && exitCode == 0 {
 		s.ActiveCommandIndex++
@@ -235,6 +272,9 @@ func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service
 	}
 
 	s.TermAttemptCount = 0
+	lock.LockMutex.Lock()
+	s.releaseLocks(s.Commands[activeCommandIndex].Locks)
+	defer lock.LockMutex.Unlock()
 	if runNextCommand {
 		go s.StartService()
 	} else {
@@ -260,9 +300,22 @@ func (s *Service) EndService() {
 		s.TermAttemptCount = 0
 		s.WaitList = []string{}
 		s.State = StateStopped
+		lock.LockMutex.Lock()
+		defer lock.LockMutex.Unlock()
+		s.releaseLocks(s.Commands[s.ActiveCommandIndex].Locks)
+		s.ActiveCommandIndex = 0
 		go s.Program.Send(ServiceStoppedMsg{Service: s.Key})
 	}
 
+}
+
+func (s *Service) releaseLocks(locks []string) {
+	lock.Unlock(locks)
+	go func() {
+		s.Program.Send(lock.LockReleaseMsg{
+			Locks: locks,
+		})
+	}()
 }
 
 func (c Command) shouldKill() bool {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/andresrobam/leggo/config"
+	"github.com/andresrobam/leggo/lock"
 	"github.com/andresrobam/leggo/log"
 	"github.com/andresrobam/leggo/service"
 	"github.com/andresrobam/leggo/yaml"
@@ -257,6 +258,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case service.StartServiceMsg:
 		startService(msg.Service)
+
+	case lock.LockReleaseMsg:
+		for i := range services {
+			services[i].HandleUnlock(msg.Locks)
+		}
 
 	case tea.WindowSizeMsg:
 		activeMutex.RLock()
@@ -626,7 +632,6 @@ func main() {
 	contextDir := filepath.Dir(absoluteFilePath)
 	services = make([]*service.Service, len(finalServiceKeys))
 	service.Services = make(map[string]*service.Service)
-	service.Locks = make(map[string]*sync.Mutex)
 	for i, serviceKey := range finalServiceKeys {
 		var name string
 		s := contextDefinition.Services[serviceKey]
@@ -646,12 +651,6 @@ func main() {
 		newService := service.New(serviceKey, name, servicePath, s.Commands, &configuration, s.Healthcheck)
 		services[i] = &newService
 		service.Services[serviceKey] = &newService
-		for j := range newService.Commands {
-			lock := newService.Commands[j].Lock
-			if service.Locks[lock] == nil {
-				service.Locks[lock] = &sync.Mutex{}
-			}
-		}
 	}
 
 	if context.Settings.ActiveService != "" {
@@ -739,7 +738,6 @@ func main() {
 // TODO: remember timestamp rules per context service
 // TODO: style sysout messages
 // TODO: style syserr messages
-// TODO: system to make sure some services arent started in parallel
 // TODO: allow overriding success codes for commands
 // TODO: automatically send second stop after 30s and then every 5s after that
 // TODO: make windows gradle/maven/java kill optional

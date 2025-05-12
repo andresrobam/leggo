@@ -58,7 +58,6 @@ func (s *Service) GetState() State {
 }
 
 var Services map[string]*Service
-var Locks map[string]*sync.Mutex
 
 func New(key string, name string, path string, commands []Command, configuration *config.Config, healthcheck Healthcheck) Service {
 	return Service{
