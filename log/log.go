@@ -135,8 +135,13 @@ func (l *Log) Scroll(amount int) {
 	l.contentUpdated.Store(true)
 }
 
-func (l *Log) ScrollDebug() string {
-	return fmt.Sprintf("l: %d, o: %d, h: %d, p: %.2f", l.currentLine, l.currentLineOffset, l.getLineHeight(l.currentLine), l.currentLineOffsetPercentage)
+func (l *Log) ScrollDebug() []string {
+	return []string{
+		fmt.Sprintf("currentline: %d", l.currentLine),
+		fmt.Sprintf("currentLineOffset: %d", l.currentLineOffset),
+		fmt.Sprintf("currentLineHeight: %d", l.getLineHeight(l.currentLine)),
+		fmt.Sprintf("currentLineOffsetPercentage: %.2f", l.currentLineOffsetPercentage),
+	}
 }
 
 func (l *Log) getLineHeight(i int) int {

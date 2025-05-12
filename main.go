@@ -123,6 +123,18 @@ func swap(increment int) {
 	saveContextSettings()
 }
 
+func getKeyPressInfo(msg tea.KeyPressMsg) []string {
+	return []string{
+		"New key press:",
+		fmt.Sprintf("msg.BaseCode: %c", msg.BaseCode),
+		fmt.Sprintf("msg.Code: %c", msg.Code),
+		fmt.Sprintf("msg.Mod: %d", msg.Mod),
+		fmt.Sprintf("msg.ShiftedCode: %c", msg.ShiftedCode),
+		fmt.Sprintf("msg.Text: %s", msg.Text),
+		fmt.Sprintf("msg.String(): %s", msg.String()),
+	}
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
 		cmd  tea.Cmd
@@ -142,8 +154,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			activeLog = activeService.Log
 		}
-		keyConsumed := activeLog.HandleKey(msg)
 		activeMutex.RUnlock()
+		if debugKeyboard {
+			for _, info := range getKeyPressInfo(msg) {
+				activeLog.AddContent(info, true)
+			}
+		}
+		keyConsumed := activeLog.HandleKey(msg)
 		if keyConsumed {
 			break
 		}
@@ -248,10 +265,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.width = msg.Width
 
-		help.SetSize(msg.Width, msg.Height-headerHeight-footerHeight)
-		for i := range services {
-			services[i].Log.SetSize(msg.Width, msg.Height-headerHeight-footerHeight)
-		}
+		setLogSizes(msg.Width, msg.Height, headerHeight, footerHeight)
 
 		if !m.ready {
 			m.ready = true
@@ -263,6 +277,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
+}
+
+func setLogSizes(width int, height int, headerHeight int, footerHeight int) {
+	help.SetSize(width, height-headerHeight-footerHeight)
+	for i := range services {
+		services[i].Log.SetSize(width, height-headerHeight-footerHeight)
+	}
 }
 
 func stopAllServices(quit bool) bool {
@@ -298,15 +319,27 @@ func (m model) View() string {
 	}
 	activeMutex.RLock()
 	defer activeMutex.RUnlock()
-	var logView string
 
+	var activeLog *log.Log
 	if showHelp {
-		logView, _ = help.View()
+		activeLog = help
 	} else {
-		logView, _ = activeService.Log.View()
+		activeLog = activeService.Log
 	}
 
-	return fmt.Sprintf("%s\n%s\n%s", m.headerView(m.width), logView, m.footerView(m.width))
+	headerView := m.headerView(m.width)
+	footerView := m.footerView(m.width)
+
+	headerHeight := lipgloss.Height(headerView)
+	footerHeight := lipgloss.Height(footerView)
+
+	if headerHeight+footerHeight+activeLog.GetHeight() != m.height {
+		setLogSizes(m.width, m.height, headerHeight, footerHeight)
+	}
+
+	logView, _ := activeLog.View()
+
+	return fmt.Sprintf("%s\n%s\n%s", headerView, logView, footerView)
 }
 
 var cmdStyle = lipgloss.NewStyle().
@@ -409,39 +442,53 @@ var statusBarBackgroundColors = []color.Color{
 
 func (m model) footerView(width int) string {
 
-	if showHelp {
-		return ""
-	}
-
-	statusBarItems := []string{
-		context.Name,
-		fmt.Sprintf("%d/%d running", runningServiceCount(), len(services)),
-		fmt.Sprintf("Log: %s", formatDataSize(activeService.Log.GetContentSize())),
-	}
-
-	if activeService.Pid != 0 {
-		statusBarItems = append(statusBarItems, fmt.Sprintf("PID %d", activeService.Pid))
-	}
-
-	var status string
-
-	if activeService.State == service.StateStopping {
-		status = "Stopping"
-	} else if activeService.State == service.StateStarting {
-		if len(activeService.WaitList) != 0 {
-			status = "Waiting for: " + strings.Join(activeService.WaitList, ", ")
+	var statusBarItems []string
+	if debugScroll {
+		var activeLog *log.Log
+		if showHelp {
+			activeLog = help
 		} else {
-			status = "Starting"
+			activeLog = activeService.Log
+		}
+		statusBarItems = activeLog.ScrollDebug()
+	} else if !showHelp {
+		statusBarItems = []string{
+			context.Name,
+			fmt.Sprintf("%d/%d running", runningServiceCount(), len(services)),
+		}
+
+		if activeService.Touched {
+			statusBarItems = append(statusBarItems, fmt.Sprintf("Log: %s", formatDataSize(activeService.Log.GetContentSize())))
+		}
+
+		if activeService.Pid != 0 {
+			statusBarItems = append(statusBarItems, fmt.Sprintf("PID %d", activeService.Pid))
+		}
+
+		var status string
+
+		if activeService.State == service.StateStopping {
+			status = "Stopping"
+		} else if activeService.State == service.StateStarting {
+			if len(activeService.WaitList) != 0 {
+				status = "Waiting for: " + strings.Join(activeService.WaitList, ", ")
+			} else {
+				status = "Starting"
+			}
+		}
+		if status != "" {
+			statusBarItems = append(statusBarItems, status)
+		}
+
+		if quitting {
+			statusBarItems = slices.Insert(statusBarItems, 1, "Quitting")
 		}
 	}
-	if status != "" {
-		statusBarItems = append(statusBarItems, status)
-	}
 
-	if quitting {
-		statusBarItems = slices.Insert(statusBarItems, 1, "Quitting")
-	}
+	return m.footerStatusBar(width, statusBarItems)
+}
 
+func (m model) footerStatusBar(width int, statusBarItems []string) string {
 	renderItems := make([]string, len(statusBarItems)*2)
 
 	for i, item := range statusBarItems {
@@ -473,6 +520,8 @@ var onlyActive bool
 var showHelp bool
 var filterLogs bool
 var help *log.Log
+var debugKeyboard bool
+var debugScroll bool
 
 var activeMutex sync.RWMutex
 
@@ -628,8 +677,8 @@ func main() {
 		"[b] to go to the bottom of the log",
 		"[t] to go to the top of the log",
 		"",
-		"[left] or [right] to move between services",
-		"[shift+left] or [shift+right] to swap places between services",
+		"[left] or [h] or [right] or [l] to move between services",
+		"[shift+left] or [shift+h] or [shift+right] or [shift+l] to swap places between services",
 		"",
 		"[s] to stop all running services",
 		"[a] to toggle between showing only running services",
@@ -656,6 +705,17 @@ func main() {
 	for i := range services {
 		services[i].Program = p
 	}
+
+	if len(os.Args) > 2 {
+		flags := os.Args[2:]
+		if slices.Contains(flags, "--debug-keyboard") {
+			debugKeyboard = true
+		}
+		if slices.Contains(flags, "--debug-scroll") {
+			debugScroll = true
+		}
+	}
+
 	go func() {
 		ticker := time.NewTicker(time.Duration(configuration.RefreshMillis) * time.Millisecond)
 		defer ticker.Stop()
