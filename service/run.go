@@ -235,7 +235,7 @@ func (s *Service) DoneWaiting(service string) {
 	}
 	s.WaitList = slices.Delete(s.WaitList, i, i+1)
 	if len(s.WaitList) == 0 {
-		s.addSysoutLine("All dependencies for are up, starting")
+		s.addSysoutLine("All dependencies are up, starting")
 		if s.State == StateStarting {
 			s.StartService()
 		}
