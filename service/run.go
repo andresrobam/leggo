@@ -50,8 +50,9 @@ type Command struct {
 }
 
 type Healthcheck struct {
-	Command string
-	Period  int
+	Command          string
+	Period           int
+	LockUntilHealthy []string
 }
 
 func (s *Service) StartService() {
@@ -92,9 +93,14 @@ func (s *Service) StartService() {
 	lock.LockMutex.Lock()
 	defer lock.LockMutex.Unlock()
 
-	if len(c.Locks) != 0 {
+	relevantLocks := c.Locks
+	if s.ActiveCommandIndex == 0 {
+		relevantLocks = slices.Concat(relevantLocks, s.Healthcheck.LockUntilHealthy)
+	}
+
+	if len(relevantLocks) != 0 {
 		s.State = StateStarting
-		if overlap := lock.Overlap(c.Locks); len(overlap) != 0 {
+		if overlap := lock.Overlap(relevantLocks); len(overlap) != 0 {
 			s.addSysoutLine(fmt.Sprintf("Waiting for locks to unlock: %s", strings.Join(overlap, ", ")))
 			return
 		}
@@ -112,9 +118,7 @@ func (s *Service) StartService() {
 			var pathErr error
 			s.cmd.Dir, pathErr = filepath.Abs(filepath.Join(s.Path, c.Path))
 			if pathErr != nil {
-				s.addSyserrLine(fmt.Sprintf("Error: getting absolute path %s", pathErr))
-				s.ActiveCommandIndex = 0
-				s.State = StateStopped
+				s.handleCommandStartingError(fmt.Sprintf("Error: getting absolute path %s", pathErr))
 				return
 			}
 		}
@@ -125,32 +129,26 @@ func (s *Service) StartService() {
 
 	outPipe, err := s.cmd.StdoutPipe()
 	if err != nil {
-		s.addSyserrLine(fmt.Sprintf("Error: opening stdout pipe %s", err))
-		s.ActiveCommandIndex = 0
-		s.State = StateStopped
+		s.handleCommandStartingError(fmt.Sprintf("Error: opening stdout pipe %s", err))
 		return
 	}
 	s.outPipe = &outPipe
 
 	errPipe, err := s.cmd.StderrPipe()
 	if err != nil {
-		s.addSyserrLine(fmt.Sprintf("Error: opening stderr pipe %s", err))
-		s.ActiveCommandIndex = 0
-		s.State = StateStopped
+		s.handleCommandStartingError(fmt.Sprintf("Error: opening stderr pipe %s", err))
 		return
 	}
 	s.errPipe = &errPipe
 
 	s.addSysoutLine(fmt.Sprintf("Running command \"%s\"%s", command, pathMessage))
 	if err := s.cmd.Start(); err != nil {
-		s.addSyserrLine(fmt.Sprintf("Error running command: %s", err))
-		s.ActiveCommandIndex = 0
-		s.State = StateStopped
+		s.handleCommandStartingError(fmt.Sprintf("Error running command: %s", err))
 		return
 	}
 	s.Pid = s.cmd.Process.Pid
 	s.State = StateStarting
-	lock.Lock(c.Locks)
+	lock.Lock(relevantLocks)
 	s.addSysoutLine(fmt.Sprintf("Process started with PID: %d", s.Pid))
 
 	wg := new(sync.WaitGroup)
@@ -163,10 +161,26 @@ func (s *Service) StartService() {
 			go s.CheckHealth()
 		} else {
 			s.State = StateRunning
+			if len(s.Healthcheck.LockUntilHealthy) != 0 {
+				s.releaseLocks(s.Healthcheck.LockUntilHealthy)
+			}
 			go s.Program.Send(ServiceStartedMsg{Service: s.Key})
 		}
 	}
 	go handleRunningProcess(wg, &outPipe, s, &errPipe)
+}
+
+func (s *Service) handleCommandStartingError(errorMessage string) {
+	s.addSyserrLine(errorMessage)
+	s.State = StateStopped
+	if s.ActiveCommandIndex != 0 {
+		s.ActiveCommandIndex = 0
+		if len(s.Healthcheck.LockUntilHealthy) != 0 {
+			lock.LockMutex.Lock()
+			defer lock.LockMutex.Unlock()
+			s.releaseLocks(s.Healthcheck.LockUntilHealthy)
+		}
+	}
 }
 
 func (s *Service) CheckHealth() {
@@ -192,6 +206,11 @@ func (s *Service) CheckHealth() {
 				return
 			}
 			s.addSysoutLine("Healthcheck passed")
+			if len(s.Healthcheck.LockUntilHealthy) != 0 {
+				lock.LockMutex.Lock()
+				defer lock.LockMutex.Unlock()
+				s.releaseLocks(s.Healthcheck.LockUntilHealthy)
+			}
 			s.State = StateRunning
 			go s.Program.Send(ServiceStartedMsg{Service: s.Key})
 			return
@@ -280,6 +299,9 @@ func handleRunningProcess(wg *sync.WaitGroup, outPipe *io.ReadCloser, s *Service
 	} else {
 		s.WaitList = []string{}
 		s.State = StateStopped
+		if len(s.Healthcheck.LockUntilHealthy) != 0 {
+			s.releaseLocks(s.Healthcheck.LockUntilHealthy)
+		}
 		go s.Program.Send(ServiceStoppedMsg{Service: s.Key})
 	}
 	s.StateMutex.Unlock()
@@ -303,6 +325,9 @@ func (s *Service) EndService() {
 		lock.LockMutex.Lock()
 		defer lock.LockMutex.Unlock()
 		s.releaseLocks(s.Commands[s.ActiveCommandIndex].Locks)
+		if len(s.Healthcheck.LockUntilHealthy) != 0 {
+			s.releaseLocks(s.Healthcheck.LockUntilHealthy)
+		}
 		s.ActiveCommandIndex = 0
 		go s.Program.Send(ServiceStoppedMsg{Service: s.Key})
 	}
