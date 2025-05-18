@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/andresrobam/leggo/config"
+	"github.com/charmbracelet/bubbles/v2/textinput"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -24,6 +25,7 @@ type Log struct {
 	searchMode                  InputMode
 	searchResults               []SearchResult
 	searchResultIndex           int
+	input                       textinput.Model
 	lastLineOpen                bool
 	currentLine                 int
 	currentLineOffset           int
@@ -64,92 +66,140 @@ func (l *Log) GetHeight() int {
 	return l.height
 }
 
-func (l *Log) HandleKey(msg tea.KeyPressMsg) bool {
+func (l *Log) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	k := msg.String()
 	if k == "ctrl+c" {
-		return false
+		return false, nil
 	}
 	switch l.mode {
 	case ModeNormal:
 		if k == "up" || k == "k" {
 			l.Scroll(-1)
-			return true
+			return true, nil
 		} else if k == "down" || k == "j" {
 			l.Scroll(1)
-			return true
+			return true, nil
 		} else if k == "pgup" {
 			l.Scroll(-l.GetHeight())
-			return true
+			return true, nil
 		} else if k == "pgdown" {
 			l.Scroll(l.GetHeight())
-			return true
+			return true, nil
 		} else if k == "b" {
 			l.GotoBottom()
-			return true
+			return true, nil
 		} else if k == "t" {
 			l.GotoTop()
-			return true
+			return true, nil
 		} else if msg.Key().Code == '/' {
 			l.mode = ModeSearchInput
-			return true
+			l.input.Focus()
+			l.contentUpdated.Store(true)
+			return true, nil
 		} else if k == "f" {
 			l.mode = ModeFilterInput
-			return true
+			l.input.Focus()
+			l.contentUpdated.Store(true)
+			return true, nil
 		}
 	case ModeSearchInput:
 		if k == "esc" {
 			l.mode = ModeNormal
-			return true
+			l.search = ""
+			l.searchResultIndex = 0
+			l.searchResults = []SearchResult{}
+			l.input.Blur()
+			l.contentUpdated.Store(true)
+			return true, nil
 		} else if k == "enter" {
 			l.mode = ModeSearchNavigation
-			return true
+			l.input.Blur()
+			l.contentUpdated.Store(true)
+			return true, nil
 		} else {
-			// TODO: pass to input
-			// TODO: handle search string change
-			return true
+			var cmd tea.Cmd
+			l.input, cmd = l.input.Update(msg)
+			l.search = l.input.Value()
+			// TODO: handle search value change
+			l.contentUpdated.Store(true)
+			return true, cmd
 		}
-
-	// TODO: tab swap mode forwards
-	// TODO: shift+tab swap mode backwards
+		// TODO: tab swap mode forwards
+		// TODO: shift+tab swap mode backwards
 	case ModeSearchNavigation:
 		// TODO: n next
 		// TODO: shift+n previous
 		if k == "esc" || k == "q" {
 			l.mode = ModeNormal
-			return true
+			l.search = ""
+			l.searchResultIndex = 0
+			l.searchResults = []SearchResult{}
+			l.input.Blur()
+			l.contentUpdated.Store(true)
+			return true, nil
 		} else if msg.Key().Code == '/' {
 			l.mode = ModeSearchInput
-			return true
+			l.input.Focus()
+			l.contentUpdated.Store(true)
+			return true, nil
 		} else if k == "f" {
 			l.mode = ModeFilterInput
-			return true
+			l.input.Focus()
+			l.contentUpdated.Store(true)
+			return true, nil
 		}
 	case ModeFilterInput:
 		if k == "esc" {
 			l.mode = ModeNormal
-			return true
+			l.filter = ""
+			l.filteredLines = make([]*string, l.height)
+			l.input.Blur()
+			l.contentUpdated.Store(true)
+			return true, nil
 		} else if k == "enter" {
 			l.mode = ModeFiltered
-			return true
+			l.input.Blur()
+			l.contentUpdated.Store(true)
+			return true, nil
 		} else {
-			// TODO: pass to input
-			return true
+			var cmd tea.Cmd
+			l.input, cmd = l.input.Update(msg)
+			l.filter = l.input.Value()
+			// TODO: handle filter value change
+			l.contentUpdated.Store(true)
+			return true, cmd
 		}
-	// TODO: tab swap mode forwards
-	// TODO: shift+tab swap mode backwards
+		// TODO: tab swap mode forwards
+		// TODO: shift+tab swap mode backwards
 	case ModeFiltered:
 		if k == "esc" || k == "q" {
 			l.mode = ModeNormal
-			return true
+			l.filter = ""
+			l.filteredLines = make([]*string, l.height)
+			l.input.Blur()
+			l.contentUpdated.Store(true)
+			return true, nil
 		} else if msg.Key().Code == '/' {
 			l.mode = ModeSearchInput
-			return true
+			l.input.Focus()
+			l.contentUpdated.Store(true)
+			return true, nil
 		} else if k == "f" {
 			l.mode = ModeFilterInput
-			return true
+			l.input.Focus()
+			l.contentUpdated.Store(true)
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
+}
+
+func (l *Log) HandleNonKeyMsg(msg tea.Msg) (cmd tea.Cmd) {
+	if l.mode != ModeFilterInput && l.mode != ModeSearchInput {
+		return nil
+	}
+	l.input, cmd = l.input.Update(msg)
+	return
 }
 
 func New(configuration *config.Config) *Log {
@@ -157,8 +207,10 @@ func New(configuration *config.Config) *Log {
 		configuration: configuration,
 		lines:         make([]string, 0, 50),
 		filteredLines: make([]*string, 0, 50),
+		input:         textinput.New(),
 	}
 	log.contentUpdated.Store(true)
+	log.input.CharLimit = 100
 	return log
 }
 
@@ -167,24 +219,18 @@ func (l *Log) GetContentSize() int {
 }
 
 func (l *Log) ActiveLineCount() int {
-	switch l.mode {
-	case ModeFilterInput:
-		fallthrough
-	case ModeFiltered:
+	if l.filter != "" && (l.mode == ModeFilterInput || l.mode == ModeFiltered) {
 		return len(l.filteredLines)
-	default:
+	} else {
 		return len(l.lines)
 	}
 }
 
 func (l *Log) activeLineWrapped(index int) []string {
 	var line string
-	switch l.mode {
-	case ModeFilterInput:
-		fallthrough
-	case ModeFiltered:
+	if l.filter != "" && (l.mode == ModeFilterInput || l.mode == ModeFiltered) {
 		line = *l.filteredLines[index]
-	default:
+	} else {
 		line = l.lines[index]
 	}
 	return strings.Split(ansi.Hardwrap(line, l.width, true), "\n")
@@ -256,6 +302,29 @@ func (l *Log) ScrollDebug() []string {
 	}
 }
 
+func (l *Log) ModeDebug() []string {
+	var mode string
+	switch l.mode {
+	case ModeFilterInput:
+		mode = "filterInput"
+	case ModeFiltered:
+		mode = "filtered"
+	case ModeSearchInput:
+		mode = "searchInput"
+	case ModeSearchNavigation:
+		mode = "searchNav"
+	default:
+		mode = "normal"
+	}
+	return []string{
+		fmt.Sprintf("mode: %s", mode),
+		fmt.Sprintf("search: %s", l.search),
+		fmt.Sprintf("filter: %s", l.filter),
+		fmt.Sprintf("inputValue: %s", l.input.Value()),
+		fmt.Sprintf("inputFocus: %t", l.input.Focused()),
+	}
+}
+
 func (l *Log) getLineHeight(i int) int {
 	if l.ActiveLineCount() == 0 {
 		return 0
@@ -278,8 +347,15 @@ func (l *Log) matchesFilter(line string) bool {
 	if l.filter == "" {
 		return false
 	}
+	switch l.filterMode {
+	case InputModeCaseInsensitive:
+		return strings.Contains(strings.ToLower(line), strings.ToLower(l.filter))
+	case InputModeCaseSensitive:
+		return strings.Contains(line, l.filter)
+	case InputModeRegex:
+		return false // TODO: handle regex
+	}
 	return false
-	// TODO:; check for match
 }
 
 func (l *Log) scroll(up bool) bool {
@@ -349,6 +425,7 @@ func (l *Log) SetSize(width int, height int) {
 	defer l.clampCurrentLine()
 	defer l.contentUpdated.Store(true)
 	defer l.contentMutex.Unlock()
+	l.input.SetWidth(width)
 	l.width = width
 	l.height = height
 	if l.ActiveLineCount() == 0 {
@@ -388,6 +465,10 @@ outer:
 
 	if screenLine >= 0 {
 		visibleLines = visibleLines[screenLine+1:]
+	}
+
+	if l.mode != ModeNormal {
+		visibleLines[0] = l.input.View()
 	}
 
 	return visibleLines

@@ -137,10 +137,16 @@ func getKeyPressInfo(msg tea.KeyPressMsg) []string {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var (
-		cmd  tea.Cmd
-		cmds []tea.Cmd
-	)
+	var cmd tea.Cmd
+
+	var activeLog *log.Log
+	activeMutex.RLock()
+	if showHelp {
+		activeLog = help
+	} else {
+		activeLog = activeService.Log
+	}
+	activeMutex.RUnlock()
 
 	switch msg := msg.(type) {
 	case tea.KeyPressMsg:
@@ -148,20 +154,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		k := msg.String()
-		var activeLog *log.Log
-		activeMutex.RLock()
-		if showHelp {
-			activeLog = help
-		} else {
-			activeLog = activeService.Log
-		}
-		activeMutex.RUnlock()
 		if debugKeyboard {
 			for _, info := range getKeyPressInfo(msg) {
 				activeLog.AddContent(info, true)
 			}
 		}
-		keyConsumed := activeLog.HandleKey(msg)
+		var keyConsumed bool
+		keyConsumed, cmd = activeLog.HandleKey(msg)
 		if keyConsumed {
 			break
 		}
@@ -266,11 +265,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		activeMutex.RUnlock()
+	default:
+		cmd = activeLog.HandleNonKeyMsg(msg)
 	}
 
-	cmds = append(cmds, cmd)
-
-	return m, tea.Batch(cmds...)
+	return m, cmd
 }
 
 func setLogSizes(width int, height int, headerHeight int, footerHeight int) {
@@ -436,7 +435,7 @@ var statusBarBackgroundColors = []color.Color{
 
 func (m model) footerView(width int) string {
 
-	var statusBarItems []string
+	var statusBars [][]string
 	if debugScroll {
 		var activeLog *log.Log
 		if showHelp {
@@ -444,9 +443,19 @@ func (m model) footerView(width int) string {
 		} else {
 			activeLog = activeService.Log
 		}
-		statusBarItems = activeLog.ScrollDebug()
-	} else if !showHelp {
-		statusBarItems = []string{
+		statusBars = append(statusBars, activeLog.ScrollDebug())
+	}
+	if debugMode {
+		var activeLog *log.Log
+		if showHelp {
+			activeLog = help
+		} else {
+			activeLog = activeService.Log
+		}
+		statusBars = append(statusBars, activeLog.ModeDebug())
+	}
+	if !showHelp {
+		statusBarItems := []string{
 			context.Name,
 			fmt.Sprintf("%d/%d running", runningServiceCount(), len(services)),
 		}
@@ -477,9 +486,19 @@ func (m model) footerView(width int) string {
 		if quitting {
 			statusBarItems = slices.Insert(statusBarItems, 1, "Quitting")
 		}
+
+		statusBars = append(statusBars, statusBarItems)
 	}
 
-	return m.footerStatusBar(width, statusBarItems)
+	out := ""
+
+	for i := range statusBars {
+		if out != "" {
+			out += "\n"
+		}
+		out += m.footerStatusBar(width, statusBars[i])
+	}
+	return out
 }
 
 func (m model) footerStatusBar(width int, statusBarItems []string) string {
@@ -516,6 +535,7 @@ var filterLogs bool
 var help *log.Log
 var debugKeyboard bool
 var debugScroll bool
+var debugMode bool
 
 var activeMutex sync.RWMutex
 
@@ -700,6 +720,9 @@ func main() {
 		}
 		if slices.Contains(flags, "--debug-scroll") {
 			debugScroll = true
+		}
+		if slices.Contains(flags, "--debug-mode") {
+			debugMode = true
 		}
 	}
 
