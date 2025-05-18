@@ -2,6 +2,7 @@ package log
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,13 @@ type Log struct {
 	width                       int
 	height                      int
 	lines                       []string
+	filteredLines               []*string
+	filter                      string
+	filterMode                  InputMode
+	search                      string
+	searchMode                  InputMode
+	searchResults               []SearchResult
+	searchResultIndex           int
 	lastLineOpen                bool
 	currentLine                 int
 	currentLineOffset           int
@@ -38,6 +46,20 @@ const (
 	ModeFiltered
 )
 
+type InputMode int
+
+const (
+	InputModeCaseInsensitive = iota
+	InputModeCaseSensitive
+	InputModeRegex
+)
+
+type SearchResult struct {
+	line     int
+	startCol int
+	endCol   int
+}
+
 func (l *Log) GetHeight() int {
 	return l.height
 }
@@ -49,10 +71,83 @@ func (l *Log) HandleKey(msg tea.KeyPressMsg) bool {
 	}
 	switch l.mode {
 	case ModeNormal:
+		if k == "up" || k == "k" {
+			l.Scroll(-1)
+			return true
+		} else if k == "down" || k == "j" {
+			l.Scroll(1)
+			return true
+		} else if k == "pgup" {
+			l.Scroll(-l.GetHeight())
+			return true
+		} else if k == "pgdown" {
+			l.Scroll(l.GetHeight())
+			return true
+		} else if k == "b" {
+			l.GotoBottom()
+			return true
+		} else if k == "t" {
+			l.GotoTop()
+			return true
+		} else if msg.Key().Code == '/' {
+			l.mode = ModeSearchInput
+			return true
+		} else if k == "f" {
+			l.mode = ModeFilterInput
+			return true
+		}
 	case ModeSearchInput:
+		if k == "esc" {
+			l.mode = ModeNormal
+			return true
+		} else if k == "enter" {
+			l.mode = ModeSearchNavigation
+			return true
+		} else {
+			// TODO: pass to input
+			// TODO: handle search string change
+			return true
+		}
+
+	// TODO: tab swap mode forwards
+	// TODO: shift+tab swap mode backwards
 	case ModeSearchNavigation:
+		// TODO: n next
+		// TODO: shift+n previous
+		if k == "esc" || k == "q" {
+			l.mode = ModeNormal
+			return true
+		} else if msg.Key().Code == '/' {
+			l.mode = ModeSearchInput
+			return true
+		} else if k == "f" {
+			l.mode = ModeFilterInput
+			return true
+		}
 	case ModeFilterInput:
+		if k == "esc" {
+			l.mode = ModeNormal
+			return true
+		} else if k == "enter" {
+			l.mode = ModeFiltered
+			return true
+		} else {
+			// TODO: pass to input
+			return true
+		}
+	// TODO: tab swap mode forwards
+	// TODO: shift+tab swap mode backwards
 	case ModeFiltered:
+		if k == "esc" || k == "q" {
+			l.mode = ModeNormal
+			return true
+		} else if msg.Key().Code == '/' {
+			l.mode = ModeSearchInput
+			return true
+		} else if k == "f" {
+			l.mode = ModeFilterInput
+			return true
+		}
 	}
 	return false
 }
@@ -61,6 +156,7 @@ func New(configuration *config.Config) *Log {
 	log := &Log{
 		configuration: configuration,
 		lines:         make([]string, 0, 50),
+		filteredLines: make([]*string, 0, 50),
 	}
 	log.contentUpdated.Store(true)
 	return log
@@ -70,12 +166,28 @@ func (l *Log) GetContentSize() int {
 	return l.size
 }
 
-func (l *Log) GetCurrentLine() int {
-	return l.currentLine
+func (l *Log) ActiveLineCount() int {
+	switch l.mode {
+	case ModeFilterInput:
+		fallthrough
+	case ModeFiltered:
+		return len(l.filteredLines)
+	default:
+		return len(l.lines)
+	}
 }
 
-func (l *Log) GetLineCount() int {
-	return len(l.lines)
+func (l *Log) activeLineWrapped(index int) []string {
+	var line string
+	switch l.mode {
+	case ModeFilterInput:
+		fallthrough
+	case ModeFiltered:
+		line = *l.filteredLines[index]
+	default:
+		line = l.lines[index]
+	}
+	return strings.Split(ansi.Hardwrap(line, l.width, true), "\n")
 }
 
 func (l *Log) View() (string, bool) {
@@ -94,7 +206,7 @@ func (l *Log) View() (string, bool) {
 }
 
 func (l *Log) clampCurrentLine() {
-	if len(l.lines) == 0 {
+	if l.ActiveLineCount() == 0 {
 		l.currentLine = 0
 		l.currentLineOffset = 0
 		l.currentLineOffsetPercentage = 0
@@ -118,7 +230,7 @@ func (l *Log) Scroll(amount int) {
 	l.contentMutex.Lock()
 	defer l.contentMutex.Unlock()
 
-	if len(l.lines) == 0 {
+	if l.ActiveLineCount() == 0 {
 		return
 	}
 
@@ -145,10 +257,10 @@ func (l *Log) ScrollDebug() []string {
 }
 
 func (l *Log) getLineHeight(i int) int {
-	if len(l.lines) == 0 {
+	if l.ActiveLineCount() == 0 {
 		return 0
 	}
-	return len(strings.Split(ansi.Hardwrap(l.lines[i], l.width, true), "\n"))
+	return len(l.activeLineWrapped(i))
 }
 
 func (l *Log) recalculateCurrentLineOffsetPercentage() {
@@ -160,6 +272,14 @@ func (l *Log) recalculateCurrentLineOffsetPercentageWithHeight(lineHeight int) {
 		return
 	}
 	l.currentLineOffsetPercentage = float32(l.currentLineOffset) / (float32(lineHeight) - 1)
+}
+
+func (l *Log) matchesFilter(line string) bool {
+	if l.filter == "" {
+		return false
+	}
+	return false
+	// TODO:; check for match
 }
 
 func (l *Log) scroll(up bool) bool {
@@ -179,7 +299,7 @@ func (l *Log) scroll(up bool) bool {
 
 	} else { // scrolling down
 		if l.currentLineOffset >= 0 { // at bottom of current line
-			if l.currentLine == len(l.lines)-1 { // at bottom of log
+			if l.currentLine == l.ActiveLineCount()-1 { // at bottom of log
 				return true
 			}
 			l.currentLine++
@@ -194,21 +314,10 @@ func (l *Log) scroll(up bool) bool {
 	return false
 }
 
-func (l *Log) Clear() {
-	l.contentMutex.Lock()
-	defer l.contentMutex.Unlock()
-	l.lastLineOpen = false
-	l.lines = make([]string, 0, 50)
-	l.currentLine = 0
-	l.currentLineOffset = 0
-	l.currentLineOffsetPercentage = 0
-	l.contentUpdated.Store(true)
-}
-
 func (l *Log) GotoTop() {
 	l.contentMutex.Lock()
 	defer l.contentMutex.Unlock()
-	if len(l.lines) == 0 {
+	if l.ActiveLineCount() == 0 {
 		return
 	}
 	l.currentLine = 0
@@ -222,17 +331,17 @@ func (l *Log) GotoTop() {
 func (l *Log) GotoBottom() {
 	l.contentMutex.Lock()
 	defer l.contentMutex.Unlock()
-	if len(l.lines) == 0 {
+	if l.ActiveLineCount() == 0 {
 		return
 	}
-	l.currentLine = len(l.lines) - 1
+	l.currentLine = l.ActiveLineCount() - 1
 	l.currentLineOffset = 0
 	l.currentLineOffsetPercentage = 0
 	l.contentUpdated.Store(true)
 }
 
 func (l *Log) AtBottom() bool {
-	return len(l.lines) == 0 || (l.currentLine == len(l.lines)-1 && l.currentLineOffset == 0)
+	return l.ActiveLineCount() == 0 || (l.currentLine == l.ActiveLineCount()-1 && l.currentLineOffset == 0)
 }
 
 func (l *Log) SetSize(width int, height int) {
@@ -242,7 +351,7 @@ func (l *Log) SetSize(width int, height int) {
 	defer l.contentMutex.Unlock()
 	l.width = width
 	l.height = height
-	if len(l.lines) == 0 {
+	if l.ActiveLineCount() == 0 {
 		return
 	}
 	currentLineHeight := l.getLineHeight(l.currentLine)
@@ -256,14 +365,14 @@ func (l *Log) SetSize(width int, height int) {
 func (l *Log) getVisibleLines() []string {
 	visibleLines := make([]string, l.height, l.height)
 
-	if len(l.lines) == 0 {
+	if l.ActiveLineCount() == 0 {
 		return visibleLines
 	}
 
 	screenLine := l.height - 1
 outer:
 	for i := l.currentLine; i >= 0; i-- {
-		wrappedLines := strings.Split(ansi.Hardwrap(l.lines[i], l.width, true), "\n")
+		wrappedLines := l.activeLineWrapped(i)
 		startingLine := len(wrappedLines) - 1
 		if i == l.currentLine {
 			startingLine += l.currentLineOffset
@@ -296,8 +405,13 @@ func (l *Log) clearOldLines() {
 	}
 	linesToDelete := 0
 	for i := range l.lines {
-		l.size -= len(l.lines[i])
-		exceededBytes -= len(l.lines[i])
+		line := l.lines[i]
+		l.size -= len(line)
+		exceededBytes -= len(line)
+		filteredIndex := slices.Index(l.filteredLines, &line)
+		if filteredIndex != -1 {
+			l.filteredLines = slices.Delete(l.filteredLines, filteredIndex, filteredIndex+1)
+		}
 		linesToDelete++
 		if exceededBytes <= 0 {
 			break
@@ -326,6 +440,22 @@ func (l *Log) AddContent(addition string, endLine bool) {
 			l.currentLine++
 		}
 	}
+	lastLine := l.lines[len(l.lines)-1]
+	if !slices.Contains(l.filteredLines, &lastLine) && l.matchesFilter(lastLine) {
+		l.filteredLines = append(l.filteredLines, &lastLine)
+	}
 	l.clearOldLines()
+	l.contentUpdated.Store(true)
+}
+
+func (l *Log) Clear() {
+	l.contentMutex.Lock()
+	defer l.contentMutex.Unlock()
+	l.lastLineOpen = false
+	l.lines = make([]string, 0, 50)
+	l.filteredLines = make([]*string, 0, 50)
+	l.currentLine = 0
+	l.currentLineOffset = 0
+	l.currentLineOffsetPercentage = 0
 	l.contentUpdated.Store(true)
 }

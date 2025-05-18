@@ -176,18 +176,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			break
-		} else if k == "up" || k == "k" {
-			activeLog.Scroll(-1)
-		} else if k == "down" || k == "j" {
-			activeLog.Scroll(1)
-		} else if k == "pgup" {
-			activeLog.Scroll(-activeLog.GetHeight())
-		} else if k == "pgdown" {
-			activeLog.Scroll(activeLog.GetHeight())
-		} else if k == "b" {
-			activeLog.GotoBottom()
-		} else if k == "t" {
-			activeLog.GotoTop()
 		} else if showHelp {
 			if msg.Key().Code == '?' || k == "enter" || k == "space" {
 				showHelp = false
