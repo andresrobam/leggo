@@ -2,6 +2,7 @@ package log
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -24,6 +25,7 @@ type Log struct {
 	search                      string
 	searchMode                  InputMode
 	searchResults               []SearchResult
+	searchResultsByLine         map[int][]*SearchResult
 	searchResultIndex           int
 	input                       textinput.Model
 	lastLineOpen                bool
@@ -60,6 +62,42 @@ type SearchResult struct {
 	line     int
 	startCol int
 	endCol   int
+}
+
+func (l *Log) find() {
+	l.searchResults = []SearchResult{}
+	l.searchResultsByLine = map[int][]*SearchResult{}
+	l.searchResultIndex = 0
+	if l.search == "" || len(l.lines) == 0 {
+		return
+	}
+	var regex string
+	switch l.searchMode {
+	case InputModeCaseInsensitive:
+		regex = regexp.QuoteMeta(strings.ToLower(l.search))
+	case InputModeCaseSensitive:
+		regex = regexp.QuoteMeta(l.search)
+	case InputModeRegex:
+		regex = l.search
+	}
+	for i := range l.lines {
+		var line string
+		if l.searchMode == InputModeCaseInsensitive {
+			line = strings.ToLower(l.lines[i])
+		} else {
+			line = l.lines[i]
+		}
+		searchRegex, _ := regexp.Compile(regex) // TODO: handle regexp compilation error
+		for _, searchResult := range searchRegex.FindAllStringIndex(line, -1) {
+			resultStruct := SearchResult{
+				line:     i,
+				startCol: searchResult[0],
+				endCol:   searchResult[1],
+			}
+			l.searchResults = append(l.searchResults, resultStruct)
+			l.searchResultsByLine[i] = append(l.searchResultsByLine[i], &resultStruct)
+		}
+	}
 }
 
 func (l *Log) GetHeight() int {
