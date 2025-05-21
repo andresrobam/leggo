@@ -3,7 +3,6 @@ package log
 import (
 	"fmt"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,14 +18,16 @@ type Log struct {
 	width                       int
 	height                      int
 	lines                       []string
-	filteredLines               []*string
+	filteredLines               []int
 	filter                      string
 	filterMode                  InputMode
+	filterErrorMessage          string
 	search                      string
 	searchMode                  InputMode
 	searchResults               []SearchResult
-	searchResultsByLine         map[int][]*SearchResult
+	searchResultsByLine         map[int][]SearchResult
 	searchResultIndex           int
+	searchErrorMessage          string
 	input                       textinput.Model
 	lastLineOpen                bool
 	currentLine                 int
@@ -64,13 +65,15 @@ type SearchResult struct {
 	endCol   int
 }
 
-func (l *Log) find(search string) {
+func (l *Log) find(search string, searchMode InputMode) {
 	l.contentMutex.RLock()
 	defer l.contentMutex.RUnlock()
+	defer l.contentUpdated.Store(true)
 	l.search = search
 	l.searchResults = []SearchResult{}
-	l.searchResultsByLine = map[int][]*SearchResult{}
+	l.searchResultsByLine = map[int][]SearchResult{}
 	l.searchResultIndex = 0
+	l.searchMode = searchMode
 	if l.search == "" || len(l.lines) == 0 {
 		return
 	}
@@ -83,6 +86,12 @@ func (l *Log) find(search string) {
 	case InputModeRegex:
 		regex = l.search
 	}
+	searchRegex, err := regexp.Compile(regex)
+	if err != nil {
+		l.searchErrorMessage = "Invalid regex"
+		return
+	}
+	l.searchErrorMessage = ""
 	for i := range l.lines {
 		var line string
 		if l.searchMode == InputModeCaseInsensitive {
@@ -90,7 +99,6 @@ func (l *Log) find(search string) {
 		} else {
 			line = l.lines[i]
 		}
-		searchRegex, _ := regexp.Compile(regex) // TODO: handle regexp compilation error
 		for _, searchResult := range searchRegex.FindAllStringIndex(line, -1) {
 			resultStruct := SearchResult{
 				line:     i,
@@ -98,21 +106,22 @@ func (l *Log) find(search string) {
 				endCol:   searchResult[1],
 			}
 			l.searchResults = append(l.searchResults, resultStruct)
-			l.searchResultsByLine[i] = append(l.searchResultsByLine[i], &resultStruct)
+			l.searchResultsByLine[i] = append(l.searchResultsByLine[i], resultStruct)
 		}
 	}
 }
 
-func (l *Log) filterResults(filter string) {
+func (l *Log) filterResults(filter string, filterMode InputMode) {
 	l.contentMutex.Lock()
 	defer l.contentMutex.Unlock()
 	defer l.contentUpdated.Store(true)
 	l.filter = filter
-	l.filteredLines = make([]*string, 0, 50)
+	l.filteredLines = make([]int, 0, 50)
+	l.filterMode = filterMode
 	l.currentLineOffset = 0
 	l.currentLineOffsetPercentage = 0
+	l.currentLine = max(len(l.lines)-1, 0)
 	if l.filter == "" {
-		l.currentLine = max(len(l.lines)-1, 0)
 		return
 	}
 	l.currentLine = 0
@@ -125,6 +134,12 @@ func (l *Log) filterResults(filter string) {
 	case InputModeRegex:
 		regex = l.filter
 	}
+	filterRegex, err := regexp.Compile(regex)
+	if err != nil {
+		l.filterErrorMessage = "Invalid regex"
+		return
+	}
+	l.searchErrorMessage = ""
 	for i := range l.lines {
 		var line string
 		if l.filterMode == InputModeCaseInsensitive {
@@ -132,9 +147,8 @@ func (l *Log) filterResults(filter string) {
 		} else {
 			line = l.lines[i]
 		}
-		searchRegex, _ := regexp.Compile(regex) // TODO: handle regexp compilation error
-		if searchRegex.MatchString(line) {
-			l.filteredLines = append(l.filteredLines, &l.lines[i])
+		if filterRegex.MatchString(line) {
+			l.filteredLines = append(l.filteredLines, i)
 		}
 	}
 	l.currentLine = max(len(l.filteredLines)-1, 0)
@@ -145,11 +159,13 @@ func (l *Log) GetHeight() int {
 }
 
 func (l *Log) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
+	// TODO: show keybinds for moving between modes somewhere
 	k := msg.String()
 	if k == "ctrl+c" {
 		return false, nil
 	}
 	switch l.mode {
+	// TODO: fix scrolling in other modes
 	case ModeNormal:
 		if k == "up" || k == "k" {
 			l.Scroll(-1)
@@ -183,17 +199,19 @@ func (l *Log) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		} else if k == "enter" {
 			l.setMode(ModeSearchNavigation)
 			return true, nil
+		} else if k == "tab" {
+			l.find(l.search, getNextMode(l.searchMode)) // TODO: show keybind somewhere
+			return true, nil
+		} else if k == "shift+tab" {
+			l.find(l.search, getPreviousMode(l.searchMode)) // TODO: show keybind somewhere
+			return true, nil
 		} else {
 			var cmd tea.Cmd
 			l.input, cmd = l.input.Update(msg)
-			l.find(l.input.Value())
+			l.find(l.input.Value(), l.searchMode)
 			return true, cmd
 		}
-		// TODO: tab swap mode forwards
-		// TODO: shift+tab swap mode backwards
 	case ModeSearchNavigation:
-		// TODO: n next
-		// TODO: shift+n previous
 		if k == "esc" || k == "q" {
 			l.setMode(ModeNormal)
 			return true, nil
@@ -203,6 +221,12 @@ func (l *Log) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		} else if k == "f" {
 			l.setMode(ModeFilterInput)
 			return true, nil
+		} else if k == "n" { // TODO: show keybind somewhere
+			l.shiftSearchResult(1)
+			return true, nil
+		} else if k == "N" { // TODO: show keybind somewhere
+			l.shiftSearchResult(-1)
+			return true, nil
 		}
 	case ModeFilterInput:
 		if k == "esc" {
@@ -211,14 +235,18 @@ func (l *Log) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		} else if k == "enter" {
 			l.setMode(ModeFiltered)
 			return true, nil
+		} else if k == "tab" {
+			l.filterResults(l.filter, getNextMode(l.filterMode)) // TODO: show keybind somewhere
+			return true, nil
+		} else if k == "shift+tab" {
+			l.filterResults(l.filter, getNextMode(l.filterMode)) // TODO: show keybind somewhere
+			return true, nil
 		} else {
 			var cmd tea.Cmd
 			l.input, cmd = l.input.Update(msg)
-			l.filterResults(l.input.Value())
+			l.filterResults(l.input.Value(), l.filterMode)
 			return true, cmd
 		}
-		// TODO: tab swap mode forwards
-		// TODO: shift+tab swap mode backwards
 	case ModeFiltered:
 		if k == "esc" || k == "q" {
 			l.setMode(ModeNormal)
@@ -234,8 +262,55 @@ func (l *Log) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	return false, nil
 }
 
+func getNextMode(mode InputMode) InputMode {
+	switch mode {
+	case InputModeCaseInsensitive:
+		return InputModeCaseSensitive
+	case InputModeCaseSensitive:
+		return InputModeRegex
+	default:
+		return InputModeCaseInsensitive
+	}
+}
+
+func getPreviousMode(mode InputMode) InputMode {
+	switch mode {
+	case InputModeRegex:
+		return InputModeCaseSensitive
+	case InputModeCaseSensitive:
+		return InputModeCaseInsensitive
+	default:
+		return InputModeRegex
+	}
+}
+
+func getLineOfCol(col int, lines []string) int {
+	return 0 // TODO: dont return 0
+}
+
+func (l *Log) shiftSearchResult(offset int) {
+	l.contentMutex.Lock()
+	if len(l.searchResults) == 0 {
+		return
+	}
+	l.searchResultIndex += offset
+	if l.searchResultIndex < 0 {
+		l.searchResultIndex = len(l.searchResults) - 1
+	} else if l.searchResultIndex >= len(l.searchResults) {
+		l.searchResultIndex = 0
+	}
+
+	searchResult := l.searchResults[l.searchResultIndex]
+	line := l.activeLineWrapped(searchResult.line, false)
+	l.currentLine = searchResult.line
+	l.currentLineOffset = -(getLineOfCol(searchResult.startCol, line) + getLineOfCol(searchResult.endCol-1, line)) / 2
+	l.contentMutex.Unlock()
+	l.Scroll(l.height / 2)
+}
+
 func (l *Log) setMode(mode Mode) {
 	l.contentMutex.Lock()
+	previousMode := l.mode
 	l.mode = mode
 
 	switch mode {
@@ -247,19 +322,30 @@ func (l *Log) setMode(mode Mode) {
 
 	switch mode {
 	case ModeFilterInput:
-		defer l.filterResults(l.filter)
+		defer l.filterResults(l.filter, l.filterMode)
+		l.input.SetValue(l.filter)
+		l.input.CursorEnd()
 	case ModeFiltered:
 	default:
-		l.filteredLines = make([]*string, l.height)
+		l.filteredLines = make([]int, 0, 50)
 	}
 
 	switch mode {
 	case ModeSearchInput:
-		defer l.find(l.search)
+		defer l.find(l.search, l.searchMode)
+		l.input.SetValue(l.search)
+		l.input.CursorEnd()
 	case ModeSearchNavigation:
 	default:
 		l.searchResultIndex = 0
 		l.searchResults = []SearchResult{}
+		l.searchResultsByLine = map[int][]SearchResult{}
+	}
+
+	if (mode != ModeFilterInput && mode != ModeFiltered) && (previousMode == ModeFilterInput || previousMode == ModeFiltered) {
+		l.currentLine = l.activeLineCount() - 1
+		l.currentLineOffset = 0
+		l.currentLineOffsetPercentage = 0
 	}
 
 	l.contentUpdated.Store(true)
@@ -278,7 +364,7 @@ func New(configuration *config.Config) *Log {
 	log := &Log{
 		configuration: configuration,
 		lines:         make([]string, 0, 50),
-		filteredLines: make([]*string, 0, 50),
+		filteredLines: make([]int, 0, 50),
 		input:         textinput.New(),
 	}
 	log.contentUpdated.Store(true)
@@ -302,12 +388,40 @@ func (l *Log) activeLineCount() int {
 	}
 }
 
-func (l *Log) activeLineWrapped(index int) []string {
+var searchResultStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#000000")).
+	Background(lipgloss.Color("#fade07"))
+var currentSearchResultStyle = lipgloss.NewStyle().
+	Foreground(lipgloss.Color("#000000")).
+	Background(lipgloss.Color("#a69514"))
+
+func (l *Log) activeLineWrapped(index int, colorSearchResults bool) []string {
 	var line string
 	if l.filterActive() {
-		line = *l.filteredLines[index]
+		line = l.lines[l.filteredLines[index]]
 	} else {
 		line = l.lines[index]
+	}
+	if colorSearchResults && line != "" {
+		if searchResults, ok := l.searchResultsByLine[index]; ok {
+			var coloredLine string
+			for i, searchResult := range searchResults {
+				var prefix string
+				if i == 0 && searchResult.startCol > 0 {
+					prefix = line[:searchResult.startCol]
+				} else if i > 0 && searchResult.startCol > searchResults[i-1].endCol {
+					prefix = line[searchResults[i-1].endCol:searchResult.startCol]
+				}
+				var style lipgloss.Style
+				if searchResult == l.searchResults[l.searchResultIndex] {
+					style = currentSearchResultStyle
+				} else {
+					style = searchResultStyle
+				}
+				coloredLine += prefix + style.Render(line[searchResult.startCol:searchResult.endCol])
+			}
+			line = coloredLine + line[searchResults[len(searchResults)-1].endCol:]
+		}
 	}
 	return strings.Split(ansi.Hardwrap(line, l.width, true), "\n")
 }
@@ -401,6 +515,7 @@ func (l *Log) ModeDebug() []string {
 		fmt.Sprintf("inputValue: %s", l.input.Value()),
 		fmt.Sprintf("inputFocus: %t", l.input.Focused()),
 		fmt.Sprintf("filteredLines: %d", len(l.filteredLines)),
+		fmt.Sprintf("searchResults: %d", len(l.searchResults)),
 	}
 }
 
@@ -408,7 +523,7 @@ func (l *Log) getLineHeight(i int) int {
 	if l.activeLineCount() == 0 {
 		return 0
 	}
-	return len(l.activeLineWrapped(i))
+	return len(l.activeLineWrapped(i, false))
 }
 
 func (l *Log) recalculateCurrentLineOffsetPercentage() {
@@ -508,7 +623,7 @@ func (l *Log) SetSize(width int, height int) {
 	defer l.clampCurrentLine()
 	defer l.contentMutex.Unlock()
 	defer l.contentUpdated.Store(true)
-	l.input.SetWidth(width)
+	l.input.SetWidth(10)
 	l.width = width
 	l.height = height
 	if l.activeLineCount() == 0 {
@@ -531,7 +646,7 @@ func (l *Log) getVisibleLines() []string {
 	screenLine := l.height - 1
 outer:
 	for i := l.currentLine; i >= 0; i-- {
-		wrappedLines := l.activeLineWrapped(i)
+		wrappedLines := l.activeLineWrapped(i, true)
 		startingLine := len(wrappedLines) - 1
 		if i == l.currentLine {
 			startingLine += l.currentLineOffset
@@ -549,11 +664,80 @@ outer:
 		visibleLines = visibleLines[screenLine+1:]
 	}
 
-	if l.mode != ModeNormal {
-		visibleLines[0] = l.input.View()
+	return visibleLines
+}
+
+func (l *Log) InputView() string {
+
+	l.contentMutex.RLock()
+	defer l.contentMutex.RUnlock()
+
+	if l.mode == ModeNormal {
+		return ""
 	}
 
-	return visibleLines
+	var mode string
+	switch l.mode {
+	case ModeFilterInput, ModeFiltered:
+		mode = "Filter"
+	case ModeSearchInput, ModeSearchNavigation:
+		mode = "Search"
+	}
+
+	return mode + ": " + l.input.View() + " " + l.inputViewRightSide()
+}
+
+func (l *Log) inputViewRightSide() string {
+
+	var errorMessage string
+
+	switch l.mode {
+	case ModeFilterInput, ModeFiltered:
+		errorMessage = l.filterErrorMessage
+	case ModeSearchInput, ModeSearchNavigation:
+		errorMessage = l.searchErrorMessage
+	}
+
+	if errorMessage != "" {
+		return errorMessage
+	}
+
+	var inputMode InputMode
+	var inputModeName string
+
+	var results string
+
+	switch l.mode {
+	case ModeFilterInput, ModeFiltered:
+		inputMode = l.filterMode
+		if l.filter != "" {
+			if len(l.filteredLines) == 0 {
+				results = "No results"
+			} else {
+				results = fmt.Sprintf("%d", len(l.filteredLines))
+			}
+		}
+	case ModeSearchInput, ModeSearchNavigation:
+		inputMode = l.searchMode
+		if l.search != "" {
+			if len(l.searchResults) == 0 {
+				results = "No results"
+			} else {
+				results = fmt.Sprintf("%d/%d", l.searchResultIndex+1, len(l.searchResults))
+			}
+		}
+	}
+
+	switch inputMode {
+	case InputModeCaseInsensitive:
+		inputModeName = "case insensitive"
+	case InputModeCaseSensitive:
+		inputModeName = "case sensitive"
+	case InputModeRegex:
+		inputModeName = "regex"
+	}
+
+	return inputModeName + " " + results
 }
 
 func (l *Log) clearOldLines() {
@@ -571,17 +755,17 @@ func (l *Log) clearOldLines() {
 		line := l.lines[i]
 		l.size -= len(line)
 		exceededBytes -= len(line)
-		filteredIndex := slices.Index(l.filteredLines, &line)
-		if filteredIndex != -1 {
-			l.filteredLines = slices.Delete(l.filteredLines, filteredIndex, filteredIndex+1)
-		}
 		linesToDelete++
 		if exceededBytes <= 0 {
 			break
 		}
 	}
+	for i := range l.filteredLines {
+		l.filteredLines[i] -= linesToDelete
+	}
 	l.lines = l.lines[linesToDelete:]
-	l.currentLine -= linesToDelete
+	l.currentLine -= linesToDelete // TODO: reduce by number of filtered lines deleted if filtered, number = first n negative elements of filteredlines, remove those elements from filteredlines
+	// TODO: remove from search results if in there
 	l.clampCurrentLine()
 }
 
@@ -589,9 +773,13 @@ func (l *Log) AddContent(addition string, endLine bool) {
 	l.contentMutex.Lock()
 	defer l.contentMutex.Unlock()
 	if l.lastLineOpen {
-		l.lines[len(l.lines)-1] += addition
+		lastLineIndex := len(l.lines) - 1
+		l.lines[lastLineIndex] += addition
 		if endLine {
 			l.lastLineOpen = false
+		}
+		if l.matchesFilter(l.lines[lastLineIndex]) && (len(l.filteredLines) == 0 || l.filteredLines[len(l.filteredLines)-1] != lastLineIndex) {
+			l.filteredLines = append(l.filteredLines, len(l.lines)-1)
 		}
 	} else {
 		atLastLine := l.AtBottom()
@@ -599,15 +787,16 @@ func (l *Log) AddContent(addition string, endLine bool) {
 		if !endLine {
 			l.lastLineOpen = true
 		}
-		if atLastLine && len(l.lines) != 1 {
+		if l.matchesFilter(addition) {
+			l.filteredLines = append(l.filteredLines, len(l.lines)-1)
+			if atLastLine && len(l.lines) != 1 {
+				l.currentLine++
+			}
+		} else if l.mode == ModeNormal && atLastLine && len(l.lines) != 1 {
 			l.currentLine++
-			// TODO: this might actually depend if filter
 		}
 	}
-	lastLine := l.lines[len(l.lines)-1]
-	if l.matchesFilter(lastLine) && !slices.Contains(l.filteredLines, &lastLine) {
-		l.filteredLines = append(l.filteredLines, &lastLine)
-	}
+	// TODO: add to search results if match
 	l.clearOldLines()
 	l.contentUpdated.Store(true)
 }
@@ -617,7 +806,10 @@ func (l *Log) Clear() {
 	defer l.contentMutex.Unlock()
 	l.lastLineOpen = false
 	l.lines = make([]string, 0, 50)
-	l.filteredLines = make([]*string, 0, 50)
+	l.filteredLines = make([]int, 0, 50)
+	l.searchResults = []SearchResult{}
+	l.searchResultsByLine = map[int][]SearchResult{}
+	l.searchResultIndex = 0
 	l.currentLine = 0
 	l.currentLineOffset = 0
 	l.currentLineOffsetPercentage = 0

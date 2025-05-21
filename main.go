@@ -273,9 +273,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func setLogSizes(width int, height int, headerHeight int, footerHeight int) {
-	help.SetSize(width, height-headerHeight-footerHeight)
+	logHeight := height - headerHeight - footerHeight - 1
+	help.SetSize(width, logHeight)
 	for i := range services {
-		services[i].Log.SetSize(width, height-headerHeight-footerHeight)
+		services[i].Log.SetSize(width, logHeight)
 	}
 }
 
@@ -326,13 +327,13 @@ func (m model) View() string {
 	headerHeight := lipgloss.Height(headerView)
 	footerHeight := lipgloss.Height(footerView)
 
-	if headerHeight+footerHeight+activeLog.GetHeight() != m.height {
+	if headerHeight+footerHeight+activeLog.GetHeight()+1 != m.height {
 		setLogSizes(m.width, m.height, headerHeight, footerHeight)
 	}
 
 	logView, _ := activeLog.View()
 
-	return fmt.Sprintf("%s\n%s\n%s", headerView, logView, footerView)
+	return fmt.Sprintf("%s\n%s\n%s\n%s", headerView, logView, footerView, activeLog.InputView())
 }
 
 var cmdStyle = lipgloss.NewStyle().
@@ -755,3 +756,4 @@ func main() {
 // TODO: add kill options as regex to config
 // TODO: add command replacement regex to config
 // TODO: show if tabs are filtered somewhere
+// TODO: handle minimum window size
