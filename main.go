@@ -27,7 +27,7 @@ type model struct {
 }
 
 func (m model) Init() tea.Cmd {
-	return nil
+	return tea.RequestKeyboardEnhancements()
 }
 
 func saveContextSettings() {
@@ -446,15 +446,6 @@ func (m model) footerView(width int) string {
 		}
 		statusBars = append(statusBars, activeLog.ScrollDebug())
 	}
-	if debugMode {
-		var activeLog *log.Log
-		if showHelp {
-			activeLog = help
-		} else {
-			activeLog = activeService.Log
-		}
-		statusBars = append(statusBars, activeLog.ModeDebug())
-	}
 	if !showHelp {
 		statusBarItems := []string{
 			context.Name,
@@ -536,7 +527,6 @@ var filterLogs bool
 var help *log.Log
 var debugKeyboard bool
 var debugScroll bool
-var debugMode bool
 
 var activeMutex sync.RWMutex
 
@@ -682,14 +672,19 @@ func main() {
 		"[up] or [k] or [mouse_scrollup] to scroll log up",
 		"[down] or [j] or [mouse_scrolldown] to scroll log down",
 		"[page up] or [page down] to scroll up or down by screen height",
-		"[b] to go to the bottom of the log",
-		"[t] to go to the top of the log",
+		"[b] or [t] to go to the bottom or top of the log",
 		"",
 		"[left] or [h] or [right] or [l] to move between services",
 		"[shift+left] or [shift+h] or [shift+right] or [shift+l] to swap places between services",
 		"",
 		"[s] to stop all running services",
 		"[a] to toggle between showing only running services",
+		"",
+		"[f] to enter filter mode",
+		"[/] to enter search mode",
+		"[q] or [esc] to exit filter/search mode",
+		"[tab] or [shift+tab] to change filter/search type (case insensitive, case sensitive or regex)",
+		"[n] or [shift+n] to move between search results",
 	}
 
 	for _, line := range helpContent {
@@ -722,9 +717,6 @@ func main() {
 		if slices.Contains(flags, "--debug-scroll") {
 			debugScroll = true
 		}
-		if slices.Contains(flags, "--debug-mode") {
-			debugMode = true
-		}
 	}
 
 	go func() {
@@ -741,9 +733,6 @@ func main() {
 }
 
 // TODO: more splitting of functions and modules and files and shit
-// TODO: ability to search logs (case sensitive, case insensitive, regex)
-// TODO: ability to filter logs
-// TODO: pretty header
 // TODO: handle too many elements on footer for viewport width
 // TODO: possibility to add timestamps to system messages
 // TODO: possibility to add timestamps to std messages

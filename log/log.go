@@ -159,31 +159,13 @@ func (l *Log) GetHeight() int {
 }
 
 func (l *Log) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
-	// TODO: show keybinds for moving between modes somewhere
 	k := msg.String()
 	if k == "ctrl+c" {
 		return false, nil
 	}
 	switch l.mode {
-	// TODO: fix scrolling in other modes
 	case ModeNormal:
-		if k == "up" || k == "k" {
-			l.Scroll(-1)
-			return true, nil
-		} else if k == "down" || k == "j" {
-			l.Scroll(1)
-			return true, nil
-		} else if k == "pgup" {
-			l.Scroll(-l.GetHeight())
-			return true, nil
-		} else if k == "pgdown" {
-			l.Scroll(l.GetHeight())
-			return true, nil
-		} else if k == "b" {
-			l.GotoBottom()
-			return true, nil
-		} else if k == "t" {
-			l.GotoTop()
+		if l.handleScroll(msg, false) {
 			return true, nil
 		} else if msg.Key().Code == '/' {
 			l.setMode(ModeSearchInput)
@@ -193,17 +175,19 @@ func (l *Log) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			return true, nil
 		}
 	case ModeSearchInput:
-		if k == "esc" {
+		if l.handleScroll(msg, true) {
+			return true, nil
+		} else if k == "esc" {
 			l.setMode(ModeNormal)
 			return true, nil
 		} else if k == "enter" {
 			l.setMode(ModeSearchNavigation)
 			return true, nil
 		} else if k == "tab" {
-			l.find(l.search, getNextMode(l.searchMode)) // TODO: show keybind somewhere
+			l.find(l.search, getNextMode(l.searchMode))
 			return true, nil
 		} else if k == "shift+tab" {
-			l.find(l.search, getPreviousMode(l.searchMode)) // TODO: show keybind somewhere
+			l.find(l.search, getPreviousMode(l.searchMode))
 			return true, nil
 		} else {
 			var cmd tea.Cmd
@@ -212,7 +196,9 @@ func (l *Log) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			return true, cmd
 		}
 	case ModeSearchNavigation:
-		if k == "esc" || k == "q" {
+		if l.handleScroll(msg, false) {
+			return true, nil
+		} else if k == "esc" || k == "q" {
 			l.setMode(ModeNormal)
 			return true, nil
 		} else if msg.Key().Code == '/' {
@@ -221,25 +207,33 @@ func (l *Log) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		} else if k == "f" {
 			l.setMode(ModeFilterInput)
 			return true, nil
-		} else if k == "n" { // TODO: show keybind somewhere
+		} else if k == "n" {
 			l.shiftSearchResult(1)
 			return true, nil
-		} else if k == "N" { // TODO: show keybind somewhere
+		} else if k == "N" {
 			l.shiftSearchResult(-1)
+			return true, nil
+		} else if k == "tab" {
+			l.find(l.search, getNextMode(l.searchMode))
+			return true, nil
+		} else if k == "shift+tab" {
+			l.find(l.search, getPreviousMode(l.searchMode))
 			return true, nil
 		}
 	case ModeFilterInput:
-		if k == "esc" {
+		if l.handleScroll(msg, true) {
+			return true, nil
+		} else if k == "esc" {
 			l.setMode(ModeNormal)
 			return true, nil
 		} else if k == "enter" {
 			l.setMode(ModeFiltered)
 			return true, nil
 		} else if k == "tab" {
-			l.filterResults(l.filter, getNextMode(l.filterMode)) // TODO: show keybind somewhere
+			l.filterResults(l.filter, getNextMode(l.filterMode))
 			return true, nil
 		} else if k == "shift+tab" {
-			l.filterResults(l.filter, getNextMode(l.filterMode)) // TODO: show keybind somewhere
+			l.filterResults(l.filter, getNextMode(l.filterMode))
 			return true, nil
 		} else {
 			var cmd tea.Cmd
@@ -248,7 +242,9 @@ func (l *Log) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 			return true, cmd
 		}
 	case ModeFiltered:
-		if k == "esc" || k == "q" {
+		if l.handleScroll(msg, false) {
+			return true, nil
+		} else if k == "esc" || k == "q" {
 			l.setMode(ModeNormal)
 			return true, nil
 		} else if msg.Key().Code == '/' {
@@ -257,9 +253,39 @@ func (l *Log) HandleKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 		} else if k == "f" {
 			l.setMode(ModeFilterInput)
 			return true, nil
+		} else if k == "tab" {
+			l.filterResults(l.filter, getNextMode(l.filterMode))
+			return true, nil
+		} else if k == "shift+tab" {
+			l.filterResults(l.filter, getNextMode(l.filterMode))
+			return true, nil
 		}
 	}
 	return false, nil
+}
+
+func (l *Log) handleScroll(msg tea.KeyPressMsg, inputMode bool) bool {
+	k := msg.String()
+	if k == "up" || (!inputMode && k == "k") {
+		l.Scroll(-1)
+		return true
+	} else if k == "down" || (!inputMode && k == "j") {
+		l.Scroll(1)
+		return true
+	} else if k == "pgup" {
+		l.Scroll(-l.GetHeight())
+		return true
+	} else if k == "pgdown" {
+		l.Scroll(l.GetHeight())
+		return true
+	} else if !inputMode && k == "b" {
+		l.GotoBottom()
+		return true
+	} else if !inputMode && k == "t" {
+		l.GotoTop()
+		return true
+	}
+	return false
 }
 
 func getNextMode(mode InputMode) InputMode {
@@ -285,7 +311,13 @@ func getPreviousMode(mode InputMode) InputMode {
 }
 
 func getLineOfCol(col int, lines []string) int {
-	return 0 // TODO: dont return 0
+	for i := range lines {
+		col -= len(lines[i])
+		if col < 0 {
+			return i
+		}
+	}
+	return len(lines) - 1
 }
 
 func (l *Log) shiftSearchResult(offset int) {
@@ -322,8 +354,8 @@ func (l *Log) setMode(mode Mode) {
 
 	switch mode {
 	case ModeFilterInput:
-		defer l.filterResults(l.filter, l.filterMode)
-		l.input.SetValue(l.filter)
+		l.input.SetValue("")
+		defer l.filterResults("", l.filterMode)
 		l.input.CursorEnd()
 	case ModeFiltered:
 	default:
@@ -332,8 +364,8 @@ func (l *Log) setMode(mode Mode) {
 
 	switch mode {
 	case ModeSearchInput:
-		defer l.find(l.search, l.searchMode)
-		l.input.SetValue(l.search)
+		l.input.SetValue("")
+		defer l.find("", l.searchMode)
 		l.input.CursorEnd()
 	case ModeSearchNavigation:
 	default:
@@ -494,31 +526,6 @@ func (l *Log) ScrollDebug() []string {
 	}
 }
 
-func (l *Log) ModeDebug() []string {
-	var mode string
-	switch l.mode {
-	case ModeFilterInput:
-		mode = "filterInput"
-	case ModeFiltered:
-		mode = "filtered"
-	case ModeSearchInput:
-		mode = "searchInput"
-	case ModeSearchNavigation:
-		mode = "searchNav"
-	default:
-		mode = "normal"
-	}
-	return []string{
-		fmt.Sprintf("mode: %s", mode),
-		fmt.Sprintf("search: %s", l.search),
-		fmt.Sprintf("filter: %s", l.filter),
-		fmt.Sprintf("inputValue: %s", l.input.Value()),
-		fmt.Sprintf("inputFocus: %t", l.input.Focused()),
-		fmt.Sprintf("filteredLines: %d", len(l.filteredLines)),
-		fmt.Sprintf("searchResults: %d", len(l.searchResults)),
-	}
-}
-
 func (l *Log) getLineHeight(i int) int {
 	if l.activeLineCount() == 0 {
 		return 0
@@ -667,7 +674,7 @@ outer:
 	return visibleLines
 }
 
-func (l *Log) InputView() string {
+func (l *Log) InputView() string { // TODO: make it pretty
 
 	l.contentMutex.RLock()
 	defer l.contentMutex.RUnlock()
@@ -684,7 +691,7 @@ func (l *Log) InputView() string {
 		mode = "Search"
 	}
 
-	return mode + ": " + l.input.View() + " " + l.inputViewRightSide()
+	return mode + l.input.View() + " | " + l.inputViewRightSide()
 }
 
 func (l *Log) inputViewRightSide() string {
@@ -737,7 +744,7 @@ func (l *Log) inputViewRightSide() string {
 		inputModeName = "regex"
 	}
 
-	return inputModeName + " " + results
+	return inputModeName + " | " + results
 }
 
 func (l *Log) clearOldLines() {
@@ -766,6 +773,7 @@ func (l *Log) clearOldLines() {
 	l.lines = l.lines[linesToDelete:]
 	l.currentLine -= linesToDelete // TODO: reduce by number of filtered lines deleted if filtered, number = first n negative elements of filteredlines, remove those elements from filteredlines
 	// TODO: remove from search results if in there
+	// TODO: tweak all search results line numbers
 	l.clampCurrentLine()
 }
 
