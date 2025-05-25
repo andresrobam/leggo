@@ -805,6 +805,23 @@ func (l *Log) AddContent(addition string, endLine bool) {
 		}
 	}
 	// TODO: add to search results if match
+	// if new line
+	//	check for matches and add to search results
+	// else
+	//	delete searchResultsbyLine for current line
+	//	for each searchResults (backwards)
+	//		if line == last line
+	//			delete
+	//		else
+	//			break
+	//	check for matches and add to search results
+	//	if current search result > len(searchResults) -1
+	//		go to last result
+	// search                      string
+	// searchMode                  InputMode
+	// searchResults               []SearchResult
+	// searchResultsByLine         map[int][]SearchResult
+	// searchResultIndex           int
 	l.clearOldLines()
 	l.contentUpdated.Store(true)
 }
