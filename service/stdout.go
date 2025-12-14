@@ -7,9 +7,9 @@ import (
 	"os/exec"
 	"sync"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/andresrobam/leggo/config"
 	"github.com/andresrobam/leggo/log"
-	tea "github.com/charmbracelet/bubbletea/v2"
 )
 
 type State int

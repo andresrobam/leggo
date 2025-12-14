@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/andresrobam/leggo/config"
 	"github.com/andresrobam/leggo/lock"
 	"github.com/andresrobam/leggo/log"
 	"github.com/andresrobam/leggo/service"
 	"github.com/andresrobam/leggo/yaml"
-	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/lipgloss/v2"
 )
 
 type model struct {
@@ -27,7 +27,7 @@ type model struct {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.RequestKeyboardEnhancements()
+	return nil
 }
 
 func saveContextSettings() {
@@ -307,9 +307,14 @@ func startService(serviceKey string) {
 	service.StateMutex.Unlock()
 }
 
-func (m model) View() string {
+func (m model) View() tea.View {
+	v := tea.View{
+		AltScreen: true,
+	}
+
 	if !m.ready {
-		return "Initializing..."
+		v.SetContent("Initializing...")
+		return v
 	}
 	activeMutex.RLock()
 	defer activeMutex.RUnlock()
@@ -333,7 +338,8 @@ func (m model) View() string {
 
 	logView, _ := activeLog.View()
 
-	return fmt.Sprintf("%s\n%s\n%s\n%s", headerView, logView, footerView, activeLog.InputView())
+	v.SetContent(fmt.Sprintf("%s\n%s\n%s\n%s", headerView, logView, footerView, activeLog.InputView()))
+	return v
 }
 
 var cmdStyle = lipgloss.NewStyle().
@@ -703,7 +709,6 @@ func main() {
 
 	p = tea.NewProgram(
 		model{},
-		tea.WithAltScreen(),
 	)
 	for i := range services {
 		services[i].Program = p
