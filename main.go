@@ -703,10 +703,6 @@ func main() {
 		services[i].Log.AddContent("Press [?] to see all key bindings.", true)
 	}
 
-	if runtime.GOOS == "windows" {
-		os.Setenv("TEA_STANDARD_RENDERER", "true")
-	}
-
 	p = tea.NewProgram(
 		model{},
 	)
