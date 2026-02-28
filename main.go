@@ -746,3 +746,5 @@ func main() {
 // TODO: add command replacement regex to config
 // TODO: show if tabs are filtered somewhere
 // TODO: handle minimum window size
+// TODO: readme
+// TODO: context examples
