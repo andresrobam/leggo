@@ -328,6 +328,7 @@ func getLineOfCol(col int, lines []string) int {
 func (l *Log) shiftSearchResult(offset int) {
 	l.contentMutex.Lock()
 	if len(l.searchResults) == 0 {
+		l.contentMutex.Unlock()
 		return
 	}
 	l.searchResultIndex += offset
@@ -840,10 +841,14 @@ func (l *Log) AddContent(addition string, endLine bool) {
 		if l.filterActive() && l.matchesFilter(addition) {
 			l.filteredLines = append(l.filteredLines, len(l.lines)-1)
 			if atLastLine && len(l.lines) != 1 {
-				l.currentLine++
+				l.currentLine = len(l.lines) - 1
 			}
 		} else if l.mode == ModeNormal && atLastLine && len(l.lines) != 1 {
 			l.currentLine++
+		} else if l.searchActive() {
+			if l.currentLine < l.height-1 {
+				l.currentLine = len(l.lines) - 1
+			}
 		}
 	}
 	if l.searchActive() {
