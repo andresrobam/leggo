@@ -28,6 +28,7 @@ type Log struct {
 	searchResultsByLine         map[int][]SearchResult
 	searchResultIndex           int
 	searchErrorMessage          string
+	searchRegex                 *regexp.Regexp
 	input                       textinput.Model
 	lastLineOpen                bool
 	currentLine                 int
@@ -90,24 +91,28 @@ func (l *Log) find(search string, searchMode InputMode) {
 	if err != nil {
 		l.searchErrorMessage = "Invalid regex"
 		return
+	} else {
+		l.searchErrorMessage = ""
+		l.searchRegex = searchRegex
 	}
-	l.searchErrorMessage = ""
 	for i := range l.lines {
-		var line string
-		if l.searchMode == InputModeCaseInsensitive {
-			line = strings.ToLower(l.lines[i])
-		} else {
-			line = l.lines[i]
+		l.addSearchResultsFromLine(i)
+	}
+}
+
+func (l *Log) addSearchResultsFromLine(i int) {
+	line := l.lines[i]
+	if l.searchMode == InputModeCaseInsensitive {
+		line = strings.ToLower(line)
+	}
+	for _, searchResult := range l.searchRegex.FindAllStringIndex(line, -1) {
+		resultStruct := SearchResult{
+			line:     i,
+			startCol: searchResult[0],
+			endCol:   searchResult[1],
 		}
-		for _, searchResult := range searchRegex.FindAllStringIndex(line, -1) {
-			resultStruct := SearchResult{
-				line:     i,
-				startCol: searchResult[0],
-				endCol:   searchResult[1],
-			}
-			l.searchResults = append(l.searchResults, resultStruct)
-			l.searchResultsByLine[i] = append(l.searchResultsByLine[i], resultStruct)
-		}
+		l.searchResults = append(l.searchResults, resultStruct)
+		l.searchResultsByLine[i] = append(l.searchResultsByLine[i], resultStruct)
 	}
 }
 
@@ -409,7 +414,11 @@ func (l *Log) GetContentSize() int {
 }
 
 func (l *Log) filterActive() bool {
-	return l.filter != "" && (l.mode == ModeFilterInput || l.mode == ModeFiltered)
+	return l.filter != "" && l.filterErrorMessage == "" && (l.mode == ModeFilterInput || l.mode == ModeFiltered)
+}
+
+func (l *Log) searchActive() bool {
+	return l.search != "" && l.searchErrorMessage == "" && (l.mode == ModeSearchInput || l.mode == ModeSearchNavigation)
 }
 
 func (l *Log) activeLineCount() int {
@@ -757,45 +766,78 @@ func (l *Log) clearOldLines() {
 	if exceededBytes <= 0 {
 		return
 	}
-	linesToDelete := 0
+	linesToDelete := []int{}
 	for i := range l.lines {
 		line := l.lines[i]
 		l.size -= len(line)
 		exceededBytes -= len(line)
-		linesToDelete++
+		linesToDelete = append(linesToDelete, i)
 		if exceededBytes <= 0 {
 			break
 		}
 	}
-	for i := range l.filteredLines {
-		l.filteredLines[i] -= linesToDelete
+	l.lines = l.lines[len(linesToDelete):]
+	if l.filterActive() {
+		for i := range l.filteredLines {
+			l.filteredLines[i] -= len(linesToDelete)
+		}
+		filteredLinesToDelete := 0
+		for _, filteredLineIndex := range l.filteredLines {
+			if filteredLineIndex >= 0 {
+				break
+			}
+			filteredLinesToDelete++
+		}
+		l.filteredLines = l.filteredLines[filteredLinesToDelete:]
+		l.currentLine -= filteredLinesToDelete
+	} else {
+		l.currentLine -= len(linesToDelete)
 	}
-	l.lines = l.lines[linesToDelete:]
-	l.currentLine -= linesToDelete // TODO: reduce by number of filtered lines deleted if filtered, number = first n negative elements of filteredlines, remove those elements from filteredlines
-	// TODO: remove from search results if in there
-	// TODO: tweak all search results line numbers
+	if l.searchActive() {
+		for _, deletedLineIndex := range linesToDelete {
+			delete(l.searchResultsByLine, deletedLineIndex)
+		}
+		clear(l.searchResultsByLine)
+		deletedSearchLines := 0
+		for i := range l.searchResults {
+			l.searchResults[i].line -= len(linesToDelete)
+			newLine := l.searchResults[i].line
+			if newLine < 0 {
+				l.searchResultIndex--
+				deletedSearchLines++
+			} else {
+				l.searchResultsByLine[newLine] = append(l.searchResultsByLine[newLine], l.searchResults[i])
+			}
+		}
+		l.searchResults = l.searchResults[deletedSearchLines:]
+		if l.searchResultIndex < 0 {
+			l.searchResultIndex = 0
+		}
+	}
 	l.clampCurrentLine()
 }
 
 func (l *Log) AddContent(addition string, endLine bool) {
 	l.contentMutex.Lock()
 	defer l.contentMutex.Unlock()
+	var addedLine bool
 	if l.lastLineOpen {
 		lastLineIndex := len(l.lines) - 1
 		l.lines[lastLineIndex] += addition
 		if endLine {
 			l.lastLineOpen = false
 		}
-		if l.matchesFilter(l.lines[lastLineIndex]) && (len(l.filteredLines) == 0 || l.filteredLines[len(l.filteredLines)-1] != lastLineIndex) {
+		if l.filterActive() && l.matchesFilter(l.lines[lastLineIndex]) && (len(l.filteredLines) == 0 || l.filteredLines[len(l.filteredLines)-1] != lastLineIndex) {
 			l.filteredLines = append(l.filteredLines, len(l.lines)-1)
 		}
 	} else {
+		addedLine = true
 		atLastLine := l.AtBottom()
 		l.lines = append(l.lines, addition)
 		if !endLine {
 			l.lastLineOpen = true
 		}
-		if l.matchesFilter(addition) {
+		if l.filterActive() && l.matchesFilter(addition) {
 			l.filteredLines = append(l.filteredLines, len(l.lines)-1)
 			if atLastLine && len(l.lines) != 1 {
 				l.currentLine++
@@ -804,24 +846,18 @@ func (l *Log) AddContent(addition string, endLine bool) {
 			l.currentLine++
 		}
 	}
-	// TODO: add to search results if match
-	// if new line
-	//	check for matches and add to search results
-	// else
-	//	delete searchResultsbyLine for current line
-	//	for each searchResults (backwards)
-	//		if line == last line
-	//			delete
-	//		else
-	//			break
-	//	check for matches and add to search results
-	//	if current search result > len(searchResults) -1
-	//		go to last result
-	// search                      string
-	// searchMode                  InputMode
-	// searchResults               []SearchResult
-	// searchResultsByLine         map[int][]SearchResult
-	// searchResultIndex           int
+	if l.searchActive() {
+		lastLineIndex := len(l.lines) - 1
+		if !addedLine {
+			searchResultsToDelete := len(l.searchResultsByLine[lastLineIndex])
+			delete(l.searchResultsByLine, lastLineIndex)
+			l.searchResults = l.searchResults[:len(l.searchResults)-searchResultsToDelete]
+		}
+		l.addSearchResultsFromLine(lastLineIndex)
+		if l.searchResultIndex > len(l.searchResults)-1 {
+			l.searchResultIndex = len(l.searchResults) - 1
+		}
+	}
 	l.clearOldLines()
 	l.contentUpdated.Store(true)
 }
