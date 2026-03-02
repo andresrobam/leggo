@@ -841,7 +841,7 @@ func (l *Log) AddContent(addition string, endLine bool) {
 		if l.filterActive() && l.matchesFilter(addition) {
 			l.filteredLines = append(l.filteredLines, len(l.lines)-1)
 			if atLastLine && len(l.lines) != 1 {
-				l.currentLine = len(l.lines) - 1
+				l.currentLine = len(l.filteredLines) - 1
 			}
 		} else if l.mode == ModeNormal && atLastLine && len(l.lines) != 1 {
 			l.currentLine++
