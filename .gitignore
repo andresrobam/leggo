@@ -3,3 +3,5 @@
 leggo.exe
 leggo
 tags
+# Added by goreleaser init:
+dist/
