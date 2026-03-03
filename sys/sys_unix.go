@@ -12,11 +12,11 @@ func GetSysProcAttr() *syscall.SysProcAttr {
 }
 
 func GracefulStop(process *os.Process) error {
-	return process.Signal(syscall.SIGTERM)
+	return syscall.Kill(-process.Pid, syscall.SIGTERM)
 }
 
 func Kill(process *os.Process) error {
-	return process.Signal(syscall.SIGKILL)
+	return syscall.Kill(-process.Pid, syscall.SIGKILL)
 }
 
 func ShouldKillMatchingRegex() []string {
