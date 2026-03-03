@@ -25,6 +25,6 @@ brews:
   - repository:
       owner: andresrobam
       name: homebrew-tap
-  directory: Formula
-  homepage: "https://github.com/andresrobam/leggo"
-  description: "A command line background process orchestrator"
+    directory: Formula
+    homepage: "https://github.com/andresrobam/leggo"
+    description: "A command line background process orchestrator"
