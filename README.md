@@ -16,7 +16,7 @@ scoop bucket add andresrobam https://github.com/andresrobam/scoop-bucket.git
 scoop install andresrobam/leggo
 ```
 
-## Running
+## Run
 
 ### Installed from scoop/homebrew
 
