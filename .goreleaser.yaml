@@ -32,3 +32,12 @@ homebrew_casks:
     directory: Casks
     homepage: "https://github.com/andresrobam/leggo"
     description: "A command line background process orchestrator"
+
+scoops:
+  - name: leggo
+    repository:
+      owner: andresrobam
+      name: scoop-bucket
+      token: "{{ .Env.HOMEBREW_SCOOP_TOKEN }}"
+    homepage: "https://github.com/andresrobam/leggo"
+    description: "A command line background process orchestrator"
