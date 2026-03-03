@@ -2,7 +2,7 @@
 
 ## Install
 
-### macOS (Homebrew)
+### macOS/Linux (Homebrew)
 
 ```bash
 brew tap andresrobam/homebrew-tap
