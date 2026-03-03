@@ -21,10 +21,14 @@ archives:
       - goos: windows
         formats: [zip]
 
-brews:
-  - repository:
+homebrew_casks:
+  - name: leggo
+    binaries:
+      - leggo
+    repository:
       owner: andresrobam
       name: homebrew-tap
-    directory: Formula
+      token: "{{ .Env.HOMEBREW_SCOOP_TOKEN }}"
+    directory: Casks
     homepage: "https://github.com/andresrobam/leggo"
     description: "A command line background process orchestrator"
