@@ -16,6 +16,16 @@ scoop bucket add andresrobam https://github.com/andresrobam/scoop-bucket.git
 scoop install andresrobam/leggo
 ```
 
-`go mod tidy` \
-`go mod vendor` \
-`go run .`
+## Running
+
+## Installed from scoop/homebrew
+
+```bash
+leggo path-to-context-file.yml
+```
+
+```bash
+go mod tidy
+go mod vendor
+go run . path-to-context-file.yml
+```
