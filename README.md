@@ -18,11 +18,13 @@ scoop install andresrobam/leggo
 
 ## Running
 
-## Installed from scoop/homebrew
+### Installed from scoop/homebrew
 
 ```bash
 leggo path-to-context-file.yml
 ```
+
+### From source code
 
 ```bash
 go mod tidy
