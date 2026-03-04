@@ -273,6 +273,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func setLogSizes(width int, height int, headerHeight int, footerHeight int) {
 	logHeight := height - headerHeight - footerHeight - 1
+	if logHeight <= 1 {
+		return
+	}
 	help.SetSize(width, logHeight)
 	for i := range services {
 		services[i].Log.SetSize(width, logHeight)
@@ -745,6 +748,5 @@ func main() {
 // TODO: add kill options as regex to config
 // TODO: add command replacement regex to config
 // TODO: show if tabs are filtered somewhere
-// TODO: handle minimum window size
 // TODO: readme
 // TODO: context examples
