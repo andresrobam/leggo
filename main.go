@@ -41,7 +41,7 @@ func saveContextSettings() {
 
 	}
 	if err := config.WriteContextSettings(&context.FilePath, &context.Settings); err != nil {
-		// TODO: show error modal
+		popup = "Error saving context settings to\n" + context.FilePath
 	}
 }
 
@@ -165,6 +165,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if k == "ctrl+c" || k == "q" || k == "esc" {
+			if popup != "" && k != "ctrl+c" {
+				popup = ""
+				break
+			}
 			if showHelp && k != "ctrl+c" {
 				showHelp = false
 				break
@@ -174,6 +178,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			break
+		} else if popup != "" {
+			popup = ""
 		} else if showHelp {
 			if msg.Key().Code == '?' || k == "enter" || k == "space" {
 				showHelp = false
@@ -340,7 +346,25 @@ func (m model) View() tea.View {
 
 	logView, _ := activeLog.View()
 
-	v.SetContent(fmt.Sprintf("%s\n%s\n%s\n%s", headerView, logView, footerView, activeLog.InputView()))
+	content := fmt.Sprintf("%s\n%s\n%s\n%s", headerView, logView, footerView, activeLog.InputView())
+
+	if popup != "" {
+		bgLayer := lipgloss.NewLayer(content)
+		contentStyle := lipgloss.NewStyle().
+			Padding(1, 1)
+		renderedContent := contentStyle.Render(popup)
+		popupBox := lipgloss.NewLayer(lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Render(renderedContent))
+
+		centerX := (m.width - popupBox.Width()) / 2
+		centerY := (m.height - popupBox.Height()) / 2
+
+		content = lipgloss.NewCompositor(bgLayer.Z(0), popupBox.X(centerX).Y(centerY).Z(1)).Render()
+	}
+
+	v.SetContent(content)
 	return v
 }
 
@@ -370,8 +394,9 @@ func (m model) headerView(width int) string {
 	if showHelp {
 		title = activeCmdStyle.Render(" Help ")
 	} else {
-		for _, i := range visibleServiceIndexes() {
-			var tabStyle *lipgloss.Style
+		var tabStyle *lipgloss.Style
+		visibleServiceIndexes := visibleServiceIndexes()
+		for _, i := range visibleServiceIndexes {
 			var stateStyle *lipgloss.Style
 			services[i].StateMutex.RLock()
 			switch services[i].State {
@@ -393,6 +418,15 @@ func (m model) headerView(width int) string {
 				tabStyle = &altCmdStyle
 			}
 			title += tabStyle.Render(" ") + stateStyle.Inherit(*tabStyle).Render("●") + tabStyle.Render(" "+services[i].Name+" ")
+		}
+		hiddenCount := len(services) - len(visibleServiceIndexes)
+		if hiddenCount > 0 {
+			if len(visibleServiceIndexes)%2 == 0 {
+				tabStyle = &cmdStyle
+			} else {
+				tabStyle = &altCmdStyle
+			}
+			title += tabStyle.Render(fmt.Sprintf(" %d more hidden ", hiddenCount))
 		}
 	}
 	return lipgloss.NewStyle().Width(width).Render(title)
@@ -535,6 +569,7 @@ var filterLogs bool
 var help *log.Log
 var debugKeyboard bool
 var debugScroll bool
+var popup string
 
 var activeMutex sync.RWMutex
 
@@ -736,7 +771,6 @@ func main() {
 }
 
 // TODO: more splitting of functions and modules and files and shit
-// TODO: handle too many elements on footer for viewport width
 // TODO: possibility to add timestamps to system messages
 // TODO: possibility to add timestamps to std messages
 // TODO: remember timestamp rules per context service
@@ -747,6 +781,5 @@ func main() {
 // TODO: make windows gradle/maven/java kill optional
 // TODO: add kill options as regex to config
 // TODO: add command replacement regex to config
-// TODO: show if tabs are filtered somewhere
 // TODO: readme
 // TODO: context examples
