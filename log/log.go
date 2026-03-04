@@ -845,7 +845,7 @@ func (l *Log) AddContent(addition string, endLine bool) {
 			}
 		} else if l.mode == ModeNormal && atLastLine && len(l.lines) != 1 {
 			l.currentLine++
-		} else if l.searchActive() {
+		} else if l.mode == ModeSearchInput || l.mode == ModeSearchNavigation {
 			if l.currentLine < l.height-1 {
 				l.currentLine = len(l.lines) - 1
 			}
