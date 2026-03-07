@@ -389,10 +389,12 @@ var stoppingStyle = lipgloss.NewStyle().
 
 func (m model) headerView(width int) string {
 
-	var title string
+	var header string
+	remainingWidth := width
+	tabs := []string{}
 
 	if showHelp {
-		title = activeCmdStyle.Render(" Help ")
+		tabs = append(tabs, activeCmdStyle.Render(" Help "))
 	} else {
 		var tabStyle *lipgloss.Style
 		visibleServiceIndexes := visibleServiceIndexes()
@@ -417,7 +419,7 @@ func (m model) headerView(width int) string {
 			} else {
 				tabStyle = &altCmdStyle
 			}
-			title += tabStyle.Render(" ") + stateStyle.Inherit(*tabStyle).Render("●") + tabStyle.Render(" "+services[i].Name+" ")
+			addTab(&header, tabStyle.Render(" ")+stateStyle.Inherit(*tabStyle).Render("●")+tabStyle.Render(" "+services[i].Name+" "), width, &remainingWidth)
 		}
 		hiddenCount := len(services) - len(visibleServiceIndexes)
 		if hiddenCount > 0 {
@@ -426,10 +428,21 @@ func (m model) headerView(width int) string {
 			} else {
 				tabStyle = &altCmdStyle
 			}
-			title += tabStyle.Render(fmt.Sprintf(" %d more hidden ", hiddenCount))
+			addTab(&header, tabStyle.Render(fmt.Sprintf(" %d more hidden ", hiddenCount)), width, &remainingWidth)
 		}
 	}
-	return lipgloss.NewStyle().Width(width).Render(title)
+
+	return lipgloss.NewStyle().Width(width).Render(header)
+}
+
+func addTab(header *string, tab string, width int, remainingWidth *int) {
+	tabWidth := lipgloss.Width(tab)
+	if *remainingWidth-tabWidth < 0 {
+		*header += "\n"
+		*remainingWidth = width
+	}
+	*header += tab
+	*remainingWidth -= tabWidth
 }
 
 func runningServiceCount() (count int) {
